@@ -11,9 +11,10 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: ""
+        value: "postgresql://postgres:Admin_postgres_supabase@db.phgfzrhdqixwdbcaojvi.supabase.co:5432/postgres?pgbouncer=true&sslmode=require"
       - key: JWT_SECRET
-        generateValue: true    # Render génère une valeur aléatoire automatiquement
+        # generateValue: true  
+        value: c53e2706e5d84f2cab96d60d7437aae4  # Render génère une valeur aléatoire automatiquement
       - key: JWT_EXPIRES_IN
         value: 30d
       - key: API_BASE_URL
