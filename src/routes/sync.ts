@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -232,7 +233,14 @@ async function processItem(
 
   // Log l'opération
   await prisma.syncLog.create({
-    data: { userId, familleId, entityType, entityId, operation, payload },
+    data: {
+      userId,
+      familleId,
+      entityType,
+      entityId,
+      operation,
+      payload: payload as Prisma.InputJsonValue,
+    },
   });
 }
 
