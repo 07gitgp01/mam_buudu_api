@@ -5,7 +5,7 @@ services:
     env: node
     region: frankfurt          # plus proche de l'Afrique de l'Ouest que Oregon
     plan: free
-    buildCommand: npm install --include=dev && npm run prisma:generate && npm run build && npm run prisma:migrate:deploy
+    buildCommand: npm install --include=dev && npm run prisma:generate && npm run build && DATABASE_URL="$DIRECT_URL" npm run prisma:migrate:deploy
     startCommand: npm start
     envVars:
       - key: NODE_ENV
