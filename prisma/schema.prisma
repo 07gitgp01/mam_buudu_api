@@ -1,0 +1,167 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─────────────────────────────────────────
+// UTILISATEURS & FAMILLES
+// ─────────────────────────────────────────
+
+model User {
+  id               String   @id @default(uuid())
+  email            String?  @unique
+  telephone        String?  @unique
+  username         String?  @unique
+  passwordHash     String   @map("password_hash")
+  nom              String
+  prenom           String
+  questionSecrete  String?  @map("question_secrete")
+  reponseHash      String?  @map("reponse_hash")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  familleMembres   FamilleMembre[]
+  syncLogs         SyncLog[]
+
+  @@map("users")
+}
+
+model Famille {
+  id                    String   @id @default(uuid())
+  nom                   String
+  codeUnique            String?  @unique @map("code_unique")
+  lieu                  String?
+  description           String?
+  viewonlyUsername      String?  @unique @map("viewonly_username")
+  viewonlyPassword      String?  @map("viewonly_password")
+  viewonlyPasswordHash  String?  @map("viewonly_password_hash")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  membres     FamilleMembre[]
+  personnes   Personne[]
+  unions      Union[]
+
+  @@map("familles")
+}
+
+model FamilleMembre {
+  id         String   @id @default(uuid())
+  familleId  String   @map("famille_id")
+  userId     String   @map("user_id")
+  role       String   @default("membre") // admin, gestionnaire, membre
+  joinedAt   DateTime @default(now()) @map("joined_at")
+  personneId String?  @unique @map("personne_id") // lien optionnel vers l'arbre généalogique (1 compte max par personne)
+
+  famille    Famille   @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  personne   Personne? @relation(fields: [personneId], references: [id], onDelete: SetNull)
+
+  @@unique([familleId, userId])
+  @@map("famille_membres")
+}
+
+// ─────────────────────────────────────────
+// PERSONNES
+// ─────────────────────────────────────────
+
+model Personne {
+  id            String    @id @default(uuid())
+  familleId     String    @map("famille_id")
+  nomNaissance  String?   @map("nom_naissance")
+  nomUsage      String?   @map("nom_usage")
+  prenoms       String?
+  sexe          String?   // M, F, autre
+  dateNaissance String?   @map("date_naissance") // format: YYYY, YYYY-MM, YYYY-MM-DD
+  lieuNaissance String?   @map("lieu_naissance")
+  dateDeces     String?   @map("date_deces")
+  lieuDeces     String?   @map("lieu_deces")
+  biographie    String?
+  notes         String?
+  photoUrl      String?   @map("photo_url")   // URL distante (upload)
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  famille           Famille            @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  unionParticipants UnionParticipant[]
+  filiations        Filiation[]
+  familleMembre     FamilleMembre?
+
+  @@map("personnes")
+}
+
+// ─────────────────────────────────────────
+// UNIONS & FILIATIONS
+// ─────────────────────────────────────────
+
+model Union {
+  id         String    @id @default(uuid())
+  familleId  String    @map("famille_id")
+  type       String?   // mariage, union_libre, fiancailles, etc.
+  dateDebut  String?   @map("date_debut")
+  lieuDebut  String?   @map("lieu_debut")
+  dateFin    String?   @map("date_fin")
+  lieuFin    String?   @map("lieu_fin")
+  notes      String?
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  famille      Famille           @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  participants UnionParticipant[]
+  filiations   Filiation[]
+
+  @@map("unions")
+}
+
+// Lien union ↔ parents (les deux conjoints)
+model UnionParticipant {
+  id         String   @id @default(uuid())
+  unionId    String   @map("union_id")
+  personneId String   @map("personne_id")
+  role       String   @default("conjoint")
+  ordre      Int      @default(0)
+
+  union      Union    @relation(fields: [unionId], references: [id], onDelete: Cascade)
+  personne   Personne @relation(fields: [personneId], references: [id], onDelete: Cascade)
+
+  @@unique([unionId, personneId])
+  @@map("union_participants")
+}
+
+// Lien union ↔ enfants
+model Filiation {
+  id               String   @id @default(uuid())
+  unionId          String   @map("union_id")
+  enfantId         String   @map("enfant_id")
+  ordreNaissance   Int      @default(0) @map("ordre_naissance")
+
+  union            Union    @relation(fields: [unionId], references: [id], onDelete: Cascade)
+  enfant           Personne @relation(fields: [enfantId], references: [id], onDelete: Cascade)
+
+  @@unique([unionId, enfantId])
+  @@map("filiations")
+}
+
+// ─────────────────────────────────────────
+// SYNC OFFLINE
+// ─────────────────────────────────────────
+
+model SyncLog {
+  id           String   @id @default(uuid())
+  userId       String   @map("user_id")
+  familleId    String   @map("famille_id")
+  entityType   String   @map("entity_type")   // personne, union, filiation
+  entityId     String   @map("entity_id")
+  operation    String                          // create, update, delete
+  payload      Json?                           // données complètes
+  syncedAt     DateTime @default(now()) @map("synced_at")
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([familleId, syncedAt])
+  @@map("sync_logs")
+}
