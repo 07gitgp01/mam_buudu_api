@@ -11,9 +11,9 @@ services:
       - key: NODE_ENV
         value: production
       - key: DATABASE_URL
-        value: "postgresql://postgres:Admin_postgres_supabase@db.phgfzrhdqixwdbcaojvi.supabase.co:5432/postgres?pgbouncer=true&sslmode=require"
+        value: "postgresql://postgres.phgfzrhdqixwdbcaojvi:Admin_postgres_supabase@aws-0-eu-west-1.pooler.supabase.com:5432/postgres?pgbouncer=true&sslmode=require"
       - key: DIRECT_URL
-        value: "postgresql://postgres:Admin_postgres_supabase@db.phgfzrhdqixwdbcaojvi.supabase.co:5432/postgres?sslmode=require"
+        value: "postgresql://postgres.phgfzrhdqixwdbcaojvi:Admin_postgres_supabase@aws-0-eu-west-1.supabase.co:5432/postgres?sslmode=require"
       - key: JWT_SECRET
         # generateValue: true  
         value: c53e2706e5d84f2cab96d60d7437aae4  # Render génère une valeur aléatoire automatiquement
@@ -24,6 +24,8 @@ services:
       - key: CORS_ORIGIN
         value: https://mam-buudu-web.netlify.app
 
+# Transaction pooler - pour l'application
+DATABASE_URL="postgresql://postgres.faguokbovbwlgstbjohy:MamanSabine1982@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true&sslmode=requi
 
  # ── API Node.js ─────────────────────────────────
   # ── API Node.js ─────────────────────────────────
