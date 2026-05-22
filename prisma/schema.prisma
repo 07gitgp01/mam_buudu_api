@@ -5,11 +5,13 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")        // 1er choix (priorité)
 }
 
 // ─────────────────────────────────────────
 // UTILISATEURS & FAMILLES
 // ─────────────────────────────────────────
+
 
 model User {
   id               String   @id @default(uuid())
