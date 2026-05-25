@@ -17,9 +17,12 @@ const PORT = process.env.PORT || 3000;
 
 // ── Sécurité ────────────────────────────────────
 app.use(helmet());
+console.log('CORS_ORIGIN env:', process.env.CORS_ORIGIN);
 const corsOrigins = process.env.CORS_ORIGIN?.trim()
   ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
   : '*';
+
+console.log('CORS_ORIGIN parsed:', corsOrigins);
 
 app.use(cors({
   origin: corsOrigins,
@@ -27,6 +30,7 @@ app.use(cors({
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
+
 
 // Rate limiting global : 200 req / 15 min par IP
 app.use(rateLimit({
@@ -68,7 +72,7 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
 
 // ── Démarrage ────────────────────────────────────
 app.listen(PORT, () => {
-  console.log(`🚀 Mam Buudu API démarrée sur le port ${PORT}`);
+  console.log(` Mam Buudu API démarrée sur le port ${PORT}`);
   console.log(`   ENV: ${process.env.NODE_ENV || 'development'}`);
 });
 
