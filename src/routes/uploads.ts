@@ -1,7 +1,6 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
-import path from 'path';
-import { StorageClient } from '@supabase/storage-js';
+import { v2 as cloudinary } from 'cloudinary';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -9,37 +8,26 @@ import { AuthRequest } from '../types';
 const router = Router();
 router.use(requireAuth);
 
-// ── Supabase Storage (sans Realtime, compatible Node 20) ──
-const SUPABASE_URL  = process.env.SUPABASE_URL!;
-const SUPABASE_KEY  = process.env.SUPABASE_KEY!;
-const STORAGE_URL   = `${SUPABASE_URL}/storage/v1`;
-const BUCKET        = 'photos';
-
-const storage = new StorageClient(STORAGE_URL, {
-  apikey: SUPABASE_KEY,
-  Authorization: `Bearer ${SUPABASE_KEY}`,
+// ── Cloudinary ───────────────────────────────────
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key:    process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
-// Crée le bucket public au démarrage si nécessaire
-(async () => {
-  const { error } = await storage.createBucket(BUCKET, { public: true });
-  if (error && !error.message.toLowerCase().includes('already exists')) {
-    console.warn('[storage] bucket init:', error.message);
-  }
-})();
-
-// Extrait le chemin relatif depuis une URL Supabase Storage
-function extractStoragePath(url: string): string | null {
+// Extrait le public_id Cloudinary depuis une URL
+// ex: https://res.cloudinary.com/ds4n9exfm/image/upload/v.../mam-buudu/abc123.jpg
+//     → mam-buudu/abc123
+function extractPublicId(url: string): string | null {
   try {
-    const marker = `/object/public/${BUCKET}/`;
-    const idx = url.indexOf(marker);
-    return idx !== -1 ? url.slice(idx + marker.length) : null;
+    const match = url.match(/\/upload\/(?:v\d+\/)?(.+?)(?:\.\w+)?$/);
+    return match ? match[1] : null;
   } catch {
     return null;
   }
 }
 
-// ── Multer en mémoire (pas de disque local) ────
+// ── Multer en mémoire ────────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -73,42 +61,36 @@ router.post(
         return;
       }
 
-      // Supprime l'ancienne photo Supabase si elle existe
+      // Supprime l'ancienne photo Cloudinary si elle existe
       if (personne.photoUrl) {
-        const oldPath = extractStoragePath(personne.photoUrl);
-        if (oldPath) await storage.from(BUCKET).remove([oldPath]);
+        const oldId = extractPublicId(personne.photoUrl);
+        if (oldId) await cloudinary.uploader.destroy(oldId).catch(() => {});
       }
 
-      // Chemin de stockage : familleId/timestamp-random.ext
-      const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
-      const storagePath = `${req.user!.familleId}/${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
-
-      // Upload vers Supabase Storage
-      const { error: uploadError } = await storage
-        .from(BUCKET)
-        .upload(storagePath, req.file.buffer, {
-          contentType: req.file.mimetype,
-          upsert: false,
-        });
-
-      if (uploadError) {
-        console.error('[storage] upload error:', uploadError);
-        res.status(500).json({ error: "Erreur lors de l'upload" });
-        return;
-      }
-
-      // URL publique permanente
-      const { data } = storage.from(BUCKET).getPublicUrl(storagePath);
-      const photoUrl = data.publicUrl;
+      // Upload vers Cloudinary (depuis le buffer mémoire)
+      const result = await new Promise<{ secure_url: string }>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `mam-buudu/${req.user!.familleId}`,
+            resource_type: 'image',
+            transformation: [{ width: 800, height: 800, crop: 'limit', quality: 'auto' }],
+          },
+          (err, result) => {
+            if (err || !result) return reject(err ?? new Error('Upload échoué'));
+            resolve(result as { secure_url: string });
+          }
+        );
+        stream.end(req.file!.buffer);
+      });
 
       const updated = await prisma.personne.update({
         where: { id: req.params.personneId },
-        data: { photoUrl },
+        data: { photoUrl: result.secure_url },
       });
 
       res.json({ photoUrl: updated.photoUrl });
     } catch (err) {
-      console.error(err);
+      console.error('[cloudinary] upload error:', err);
       res.status(500).json({ error: "Erreur lors de l'upload" });
     }
   }
@@ -127,8 +109,8 @@ router.delete('/photo/:personneId', async (req: AuthRequest, res: Response): Pro
     }
 
     if (personne.photoUrl) {
-      const storagePath = extractStoragePath(personne.photoUrl);
-      if (storagePath) await storage.from(BUCKET).remove([storagePath]);
+      const publicId = extractPublicId(personne.photoUrl);
+      if (publicId) await cloudinary.uploader.destroy(publicId).catch(() => {});
     }
 
     await prisma.personne.update({
