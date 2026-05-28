@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
-import fs from 'fs';
+import { StorageClient } from '@supabase/storage-js';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
@@ -9,23 +9,40 @@ import { AuthRequest } from '../types';
 const router = Router();
 router.use(requireAuth);
 
-// ── Multer : stockage local dans /uploads ───────
-const storage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    const dir = path.join(__dirname, '..', '..', 'uploads');
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename: (_req, file, cb) => {
-    const ext = path.extname(file.originalname).toLowerCase();
-    const name = `${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
-    cb(null, name);
-  },
+// ── Supabase Storage (sans Realtime, compatible Node 20) ──
+const SUPABASE_URL  = process.env.SUPABASE_URL!;
+const SUPABASE_KEY  = process.env.SUPABASE_KEY!;
+const STORAGE_URL   = `${SUPABASE_URL}/storage/v1`;
+const BUCKET        = 'photos';
+
+const storage = new StorageClient(STORAGE_URL, {
+  apikey: SUPABASE_KEY,
+  Authorization: `Bearer ${SUPABASE_KEY}`,
 });
 
+// Crée le bucket public au démarrage si nécessaire
+(async () => {
+  const { error } = await storage.createBucket(BUCKET, { public: true });
+  if (error && !error.message.toLowerCase().includes('already exists')) {
+    console.warn('[storage] bucket init:', error.message);
+  }
+})();
+
+// Extrait le chemin relatif depuis une URL Supabase Storage
+function extractStoragePath(url: string): string | null {
+  try {
+    const marker = `/object/public/${BUCKET}/`;
+    const idx = url.indexOf(marker);
+    return idx !== -1 ? url.slice(idx + marker.length) : null;
+  } catch {
+    return null;
+  }
+}
+
+// ── Multer en mémoire (pas de disque local) ────
 const upload = multer({
-  storage,
-  limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB max
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     if (allowed.includes(file.mimetype)) {
@@ -37,7 +54,6 @@ const upload = multer({
 });
 
 // ── POST /api/uploads/photo/:personneId ─────────
-// Upload la photo d'une personne et met à jour photoUrl
 router.post(
   '/photo/:personneId',
   upload.single('photo'),
@@ -48,30 +64,43 @@ router.post(
     }
 
     try {
-      // Vérifie que la personne appartient à la famille
       const personne = await prisma.personne.findFirst({
         where: { id: req.params.personneId, familleId: req.user!.familleId },
       });
 
       if (!personne) {
-        // Supprime le fichier uploadé inutilement
-        fs.unlink(req.file.path, () => {});
         res.status(404).json({ error: 'Personne introuvable' });
         return;
       }
 
-      // Supprime l'ancienne photo locale si elle existe
+      // Supprime l'ancienne photo Supabase si elle existe
       if (personne.photoUrl) {
-        const oldFilename = path.basename(personne.photoUrl);
-        const oldPath = path.join(__dirname, '..', '..', 'uploads', oldFilename);
-        if (fs.existsSync(oldPath)) fs.unlink(oldPath, () => {});
+        const oldPath = extractStoragePath(personne.photoUrl);
+        if (oldPath) await storage.from(BUCKET).remove([oldPath]);
       }
 
-      // Construit l'URL publique
-      const baseUrl = process.env.API_BASE_URL || `http://localhost:${process.env.PORT || 3000}`;
-      const photoUrl = `${baseUrl}/uploads/${req.file.filename}`;
+      // Chemin de stockage : familleId/timestamp-random.ext
+      const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+      const storagePath = `${req.user!.familleId}/${Date.now()}-${Math.random().toString(36).slice(2)}${ext}`;
 
-      // Met à jour la personne
+      // Upload vers Supabase Storage
+      const { error: uploadError } = await storage
+        .from(BUCKET)
+        .upload(storagePath, req.file.buffer, {
+          contentType: req.file.mimetype,
+          upsert: false,
+        });
+
+      if (uploadError) {
+        console.error('[storage] upload error:', uploadError);
+        res.status(500).json({ error: "Erreur lors de l'upload" });
+        return;
+      }
+
+      // URL publique permanente
+      const { data } = storage.from(BUCKET).getPublicUrl(storagePath);
+      const photoUrl = data.publicUrl;
+
       const updated = await prisma.personne.update({
         where: { id: req.params.personneId },
         data: { photoUrl },
@@ -79,10 +108,8 @@ router.post(
 
       res.json({ photoUrl: updated.photoUrl });
     } catch (err) {
-      // Nettoie le fichier en cas d'erreur
-      if (req.file) fs.unlink(req.file.path, () => {});
       console.error(err);
-      res.status(500).json({ error: 'Erreur lors de l\'upload' });
+      res.status(500).json({ error: "Erreur lors de l'upload" });
     }
   }
 );
@@ -100,9 +127,8 @@ router.delete('/photo/:personneId', async (req: AuthRequest, res: Response): Pro
     }
 
     if (personne.photoUrl) {
-      const filename = path.basename(personne.photoUrl);
-      const filePath = path.join(__dirname, '..', '..', 'uploads', filename);
-      if (fs.existsSync(filePath)) fs.unlink(filePath, () => {});
+      const storagePath = extractStoragePath(personne.photoUrl);
+      if (storagePath) await storage.from(BUCKET).remove([storagePath]);
     }
 
     await prisma.personne.update({
