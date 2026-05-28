@@ -11,6 +11,7 @@ import unionsRouter from './routes/unions';
 import famillesRouter from './routes/familles';
 import uploadsRouter from './routes/uploads';
 import syncRouter from './routes/sync';
+import { prisma } from './lib/prisma';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -70,10 +71,24 @@ app.use((err: Error, _req: express.Request, res: express.Response, _next: expres
   res.status(500).json({ error: 'Erreur interne du serveur' });
 });
 
+// ── Nettoyage des vieilles URLs Render (éphémères) ──
+async function cleanOldRenderPhotos(): Promise<void> {
+  try {
+    const { count } = await prisma.personne.updateMany({
+      where: { photoUrl: { contains: 'onrender.com/uploads/' } },
+      data: { photoUrl: null },
+    });
+    if (count > 0) console.log(`[startup] ${count} ancienne(s) photo(s) Render nettoyée(s)`);
+  } catch (e) {
+    console.warn('[startup] nettoyage photos:', e);
+  }
+}
+
 // ── Démarrage ────────────────────────────────────
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(` Mam Buudu API démarrée sur le port ${PORT}`);
   console.log(`   ENV: ${process.env.NODE_ENV || 'development'}`);
+  await cleanOldRenderPhotos();
 });
 
 export default app;
