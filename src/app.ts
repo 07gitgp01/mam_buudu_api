@@ -27,7 +27,7 @@ console.log('CORS_ORIGIN parsed:', corsOrigins);
 
 app.use(cors({
   origin: corsOrigins,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
 }));
