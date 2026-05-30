@@ -190,6 +190,7 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
       return { user, famille };
     });
 
+    
     const token = generateToken(result.user.id, result.user.email, result.famille.id);
 
     res.status(201).json({
