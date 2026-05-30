@@ -22,7 +22,7 @@ services:
       - key: API_BASE_URL
         value: https://mam-buudu-api.onrender.com
       - key: CORS_ORIGIN
-        value: https://mam-buudu-web.netlify.app
+        value: https://mam-buudu-web.netlify.app, https://V_1--mambuudu.netlify.app, http://localhost:4200, http://localhost:4202
 
 # Transaction pooler - pour l'application
 DATABASE_URL="postgresql://postgres.faguokbovbwlgstbjohy:MamanSabine1982@aws-0-eu-west-1.pooler.supabase.com:6543/postgres?pgbouncer=true&sslmode=requi
