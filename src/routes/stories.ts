@@ -14,7 +14,7 @@ const createStorySchema = z.object({
   caption:   z.string().min(1).max(5000),
   tag:       z.string().max(50).optional().nullable(),
   mediaUrl:  z.string().url().optional().nullable(),
-  mediaType: z.enum(['photo', 'video', 'text']).optional().nullable(),
+  mediaType: z.enum(['photo', 'video', 'text', 'audio']).optional().nullable(),
   expiresAt: z.string().datetime().optional().nullable(), // ISO string, null = permanent
   privacy:   z.enum(['family', 'custom', 'private']).default('family'),
 });
