@@ -52,6 +52,7 @@ model Famille {
   personnes   Personne[]
   unions      Union[]
   stories     Story[]
+  photos      Photo[]
 
   @@map("familles")
 }
@@ -97,6 +98,7 @@ model Personne {
   unionParticipants UnionParticipant[]
   filiations        Filiation[]
   familleMembre     FamilleMembre?
+  photos            Photo[]
 
   @@map("personnes")
 }
@@ -232,6 +234,27 @@ model StoryView {
 
   @@unique([storyId, userId])
   @@map("story_views")
+}
+
+// ─────────────────────────────────────────
+// ALBUMS PHOTOS
+// ─────────────────────────────────────────
+
+model Photo {
+  id        String   @id @default(uuid())
+  personneId String  @map("personne_id")
+  familleId  String  @map("famille_id")
+  url        String
+  caption    String?
+  datePrise  String? @map("date_prise")   // YYYY, YYYY-MM ou YYYY-MM-DD
+  lieuPrise  String? @map("lieu_prise")
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  personne   Personne @relation(fields: [personneId], references: [id], onDelete: Cascade)
+  famille    Famille  @relation(fields: [familleId], references: [id], onDelete: Cascade)
+
+  @@index([personneId])
+  @@map("photos")
 }
 
 // ─────────────────────────────────────────
