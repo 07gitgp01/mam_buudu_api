@@ -27,7 +27,7 @@ function extractPublicId(url: string): string | null {
   }
 }
 
-// ── Multer en mémoire ────────────────────────────
+// ── Multer — photos profil ────────────────────────
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
@@ -38,6 +38,19 @@ const upload = multer({
     } else {
       cb(new Error('Format non supporté (jpeg, png, webp, gif uniquement)'));
     }
+  },
+});
+
+// ── Multer — médias story (image + vidéo, 30 MB) ─
+const storyUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 30 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+      'video/mp4', 'video/quicktime', 'video/webm', 'video/mpeg',
+    ];
+    cb(null, allowed.includes(file.mimetype));
   },
 });
 
@@ -124,5 +137,45 @@ router.delete('/photo/:personneId', async (req: AuthRequest, res: Response): Pro
     res.status(500).json({ error: 'Erreur' });
   }
 });
+
+// ── POST /api/uploads/story-media ───────────────
+router.post(
+  '/story-media',
+  storyUpload.single('media'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    if (!req.file) {
+      res.status(400).json({ error: 'Aucun fichier reçu' });
+      return;
+    }
+
+    const isVideo = req.file.mimetype.startsWith('video/');
+    const resourceType = isVideo ? 'video' : 'image';
+    const mediaType    = isVideo ? 'video' : 'photo';
+
+    try {
+      const result = await new Promise<{ secure_url: string }>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `mam-buudu/${req.user!.familleId}/stories`,
+            resource_type: resourceType as 'image' | 'video',
+            ...(isVideo
+              ? {}
+              : { transformation: [{ width: 1080, height: 1080, crop: 'limit', quality: 'auto' }] }),
+          },
+          (err, result) => {
+            if (err || !result) return reject(err ?? new Error('Upload échoué'));
+            resolve(result as { secure_url: string });
+          }
+        );
+        stream.end(req.file!.buffer);
+      });
+
+      res.json({ mediaUrl: result.secure_url, mediaType });
+    } catch (err) {
+      console.error('[cloudinary] story-media upload error:', err);
+      res.status(500).json({ error: "Erreur lors de l'upload" });
+    }
+  }
+);
 
 export default router;
