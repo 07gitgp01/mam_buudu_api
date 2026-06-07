@@ -32,6 +32,7 @@ model User {
   storyReactions   StoryReaction[]
   storyComments    StoryComment[]
   storyViews       StoryView[]
+  notifications    Notification[]
 
   @@map("users")
 }
@@ -48,11 +49,12 @@ model Famille {
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 
-  membres     FamilleMembre[]
-  personnes   Personne[]
-  unions      Union[]
-  stories     Story[]
-  photos      Photo[]
+  membres       FamilleMembre[]
+  personnes     Personne[]
+  unions        Union[]
+  stories       Story[]
+  photos        Photo[]
+  notifications Notification[]
 
   @@map("familles")
 }
@@ -255,6 +257,29 @@ model Photo {
 
   @@index([personneId])
   @@map("photos")
+}
+
+// ─────────────────────────────────────────
+// NOTIFICATIONS
+// ─────────────────────────────────────────
+
+model Notification {
+  id          String   @id @default(uuid())
+  familleId   String   @map("famille_id")
+  userId      String   @map("user_id")
+  type        String   // 'anniversaire' | 'bienvenue'
+  titre       String
+  message     String
+  lue         Boolean  @default(false)
+  data        Json?    // { personneId, nom, age, photoUrl }
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  famille     Famille  @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, lue])
+  @@index([familleId])
+  @@map("notifications")
 }
 
 // ─────────────────────────────────────────

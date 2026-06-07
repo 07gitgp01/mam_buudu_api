@@ -14,6 +14,8 @@ import syncRouter from './routes/sync';
 import storiesRouter from './routes/stories';
 import searchRouter from './routes/search';
 import photosRouter from './routes/photos';
+import notificationsRouter from './routes/notifications';
+import { startCronJobs } from './cron/anniversaires';
 import { prisma } from './lib/prisma';
 
 const app = express();
@@ -58,8 +60,9 @@ app.use('/api/unions', unionsRouter);
 app.use('/api/uploads', uploadsRouter);
 app.use('/api/sync', syncRouter);
 app.use('/api/stories', storiesRouter);
-app.use('/api/search',  searchRouter);
-app.use('/api/photos',  photosRouter);
+app.use('/api/search',        searchRouter);
+app.use('/api/photos',        photosRouter);
+app.use('/api/notifications', notificationsRouter);
 
 // ── Health check ────────────────────────────────
 app.get('/health', (_req, res) => {
@@ -95,6 +98,7 @@ app.listen(PORT, async () => {
   console.log(` Mam Buudu API démarrée sur le port ${PORT}`);
   console.log(`   ENV: ${process.env.NODE_ENV || 'development'}`);
   await cleanOldRenderPhotos();
+  startCronJobs();
 });
 
 export default app;
