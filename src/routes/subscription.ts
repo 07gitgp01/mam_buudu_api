@@ -85,24 +85,26 @@ router.post('/checkout', requireAuth, async (req: AuthRequest, res: Response): P
       return;
     }
 
-    const user       = req.user!;
-    const transId    = `MB-${randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase()}`;
-    const returnUrl  = `${process.env.FRONTEND_URL ?? 'https://mam-buudu.vercel.app'}/app/admin?payment=success`;
-    const notifyUrl  = `${process.env.API_URL ?? 'https://mam-buudu-api.onrender.com'}/api/subscription/webhook`;
+    const user    = req.user!;
+    const dbUser  = await prisma.user.findUnique({ where: { id: user.id }, select: { nom: true, prenom: true } });
+
+    const transId   = `MB-${randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase()}`;
+    const returnUrl = `${process.env.FRONTEND_URL ?? 'https://mam-buudu.vercel.app'}/app/admin?payment=success`;
+    const notifyUrl = `${process.env.API_URL ?? 'https://mam-buudu-api.onrender.com'}/api/subscription/webhook`;
 
     const payload = {
       apikey,
       site_id,
-      transaction_id: transId,
-      amount:         plan.prix,
-      currency:       'XOF',
-      description:    `Abonnement ${plan.label} — Mam Buudu`,
-      return_url:     returnUrl,
-      notify_url:     notifyUrl,
-      customer_name:  user.nom,
-      customer_surname: user.prenom,
-      customer_email: user.email ?? '',
-      metadata:       JSON.stringify({ familleId: user.familleId, planId }),
+      transaction_id:  transId,
+      amount:          plan.prix,
+      currency:        'XOF',
+      description:     `Abonnement ${plan.label} — Mam Buudu`,
+      return_url:      returnUrl,
+      notify_url:      notifyUrl,
+      customer_name:   dbUser?.nom ?? '',
+      customer_surname: dbUser?.prenom ?? '',
+      customer_email:  user.email ?? '',
+      metadata:        JSON.stringify({ familleId: user.familleId, planId }),
     };
 
     const response = await fetch(CINETPAY_API, {
