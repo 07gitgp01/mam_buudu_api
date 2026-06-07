@@ -23,6 +23,7 @@ model User {
   prenom           String
   questionSecrete  String?  @map("question_secrete")
   reponseHash      String?  @map("reponse_hash")
+  emailVerified    Boolean  @default(false) @map("email_verified")
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -33,6 +34,8 @@ model User {
   storyComments    StoryComment[]
   storyViews       StoryView[]
   notifications    Notification[]
+  passwordResets   PasswordReset[]
+  emailVerifications EmailVerification[]
 
   @@map("users")
 }
@@ -331,6 +334,38 @@ model Notification {
   @@index([userId, lue])
   @@index([familleId])
   @@map("notifications")
+}
+
+// ─────────────────────────────────────────
+// AUTH TOKENS
+// ─────────────────────────────────────────
+
+model PasswordReset {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("password_resets")
+}
+
+model EmailVerification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  usedAt    DateTime? @map("used_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@map("email_verifications")
 }
 
 // ─────────────────────────────────────────

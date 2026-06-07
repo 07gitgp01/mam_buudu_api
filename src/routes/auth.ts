@@ -1,10 +1,12 @@
 import { Router, Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
+import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { generateToken, generateViewonlyToken, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { sendEmail, tplPasswordReset, tplEmailVerification } from '../lib/mailer';
 
 const router = Router();
 
@@ -556,6 +558,146 @@ router.get('/me', requireAuth, async (req: AuthRequest, res: Response): Promise<
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur' });
+  }
+});
+
+// ── POST /api/auth/forgot-password ───────────────────────────────────────────
+// Envoie un email de réinitialisation (rate-limited)
+
+const forgotLimit = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 5,
+  message: { error: 'Trop de demandes, réessayez dans 1 heure.' },
+});
+
+router.post('/forgot-password', forgotLimit, async (req: Request, res: Response): Promise<void> => {
+  const { email } = req.body;
+  if (!email || typeof email !== 'string') {
+    res.status(400).json({ error: 'Email requis' });
+    return;
+  }
+
+  // Toujours répondre 200 pour ne pas révéler si l'email existe
+  res.json({ message: 'Si cet email est enregistré, vous recevrez un lien de réinitialisation.' });
+
+  try {
+    const user = await prisma.user.findUnique({ where: { email: email.toLowerCase().trim() } });
+    if (!user) return;
+
+    const token     = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1h
+
+    await prisma.passwordReset.create({
+      data: { userId: user.id, token, expiresAt },
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL ?? 'https://mam-buudu.vercel.app';
+    const lien        = `${frontendUrl}/auth/reset-password?token=${token}`;
+
+    await sendEmail({
+      to:      user.email!,
+      subject: 'Réinitialisation de votre mot de passe Mam Buudu',
+      html:    tplPasswordReset(`${user.prenom} ${user.nom}`, lien),
+    });
+  } catch (err) {
+    console.error('[forgot-password]', err);
+  }
+});
+
+// ── POST /api/auth/reset-password ─────────────────────────────────────────────
+// Valide le token et met à jour le mot de passe
+
+router.post('/reset-password', async (req: Request, res: Response): Promise<void> => {
+  const { token, password } = req.body;
+  if (!token || !password || password.length < 8) {
+    res.status(400).json({ error: 'Token et mot de passe (8 car. min.) requis' });
+    return;
+  }
+
+  try {
+    const reset = await prisma.passwordReset.findUnique({
+      where: { token },
+      include: { user: true },
+    });
+
+    if (!reset || reset.usedAt || reset.expiresAt < new Date()) {
+      res.status(400).json({ error: 'Lien invalide ou expiré.' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: reset.userId }, data: { passwordHash } }),
+      prisma.passwordReset.update({ where: { id: reset.id }, data: { usedAt: new Date() } }),
+    ]);
+
+    res.json({ message: 'Mot de passe réinitialisé avec succès.' });
+  } catch (err) {
+    console.error('[reset-password]', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── POST /api/auth/send-verification-email ────────────────────────────────────
+// Envoie (ou renvoie) l'email de vérification
+
+router.post('/send-verification-email', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  if (req.user?.isViewonly) { res.status(403).json({ error: 'Accès refusé' }); return; }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) { res.status(404).json({ error: 'Utilisateur introuvable' }); return; }
+    if (!user.email) { res.status(400).json({ error: 'Aucun email associé à ce compte' }); return; }
+    if (user.emailVerified) { res.json({ message: 'Email déjà vérifié' }); return; }
+
+    const token     = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24h
+
+    await prisma.emailVerification.create({
+      data: { userId: user.id, token, expiresAt },
+    });
+
+    const frontendUrl = process.env.FRONTEND_URL ?? 'https://mam-buudu.vercel.app';
+    const lien        = `${frontendUrl}/auth/verify-email?token=${token}`;
+
+    await sendEmail({
+      to:      user.email,
+      subject: 'Vérification de votre adresse email — Mam Buudu',
+      html:    tplEmailVerification(`${user.prenom} ${user.nom}`, lien),
+    });
+
+    res.json({ message: 'Email de vérification envoyé.' });
+  } catch (err) {
+    console.error('[send-verification]', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── POST /api/auth/verify-email ───────────────────────────────────────────────
+// Valide le token de vérification email
+
+router.post('/verify-email', async (req: Request, res: Response): Promise<void> => {
+  const { token } = req.body;
+  if (!token) { res.status(400).json({ error: 'Token requis' }); return; }
+
+  try {
+    const record = await prisma.emailVerification.findUnique({ where: { token } });
+
+    if (!record || record.usedAt || record.expiresAt < new Date()) {
+      res.status(400).json({ error: 'Lien invalide ou expiré.' });
+      return;
+    }
+
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: record.userId }, data: { emailVerified: true } }),
+      prisma.emailVerification.update({ where: { id: record.id }, data: { usedAt: new Date() } }),
+    ]);
+
+    res.json({ message: 'Email vérifié avec succès.' });
+  } catch (err) {
+    console.error('[verify-email]', err);
+    res.status(500).json({ error: 'Erreur serveur' });
   }
 });
 
