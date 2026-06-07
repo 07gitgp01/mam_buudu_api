@@ -28,6 +28,10 @@ model User {
 
   familleMembres   FamilleMembre[]
   syncLogs         SyncLog[]
+  stories          Story[]
+  storyReactions   StoryReaction[]
+  storyComments    StoryComment[]
+  storyViews       StoryView[]
 
   @@map("users")
 }
@@ -47,6 +51,7 @@ model Famille {
   membres     FamilleMembre[]
   personnes   Personne[]
   unions      Union[]
+  stories     Story[]
 
   @@map("familles")
 }
@@ -146,6 +151,87 @@ model Filiation {
 
   @@unique([unionId, enfantId])
   @@map("filiations")
+}
+
+// ─────────────────────────────────────────
+// STORIES
+// ─────────────────────────────────────────
+
+model Story {
+  id          String    @id @default(uuid())
+  familleId   String    @map("famille_id")
+  creatorId   String    @map("creator_id")
+
+  // Contenu
+  titre       String?
+  caption     String                          // texte principal
+  tag         String?                         // Souvenir, Événement, Culture…
+  mediaUrl    String?   @map("media_url")     // URL Cloudinary
+  mediaType   String?   @map("media_type")    // photo | video | text
+
+  // Expiration (null = permanent pour le web, 24h pour le mobile)
+  expiresAt   DateTime? @map("expires_at")
+
+  // Visibilité
+  privacy     String    @default("family")    // family | custom | private
+
+  // Stats
+  viewCount   Int       @default(0) @map("view_count")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  famille     Famille        @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  creator     User           @relation(fields: [creatorId], references: [id], onDelete: Cascade)
+  reactions   StoryReaction[]
+  comments    StoryComment[]
+  views       StoryView[]
+
+  @@index([familleId, createdAt])
+  @@map("stories")
+}
+
+model StoryReaction {
+  id        String   @id @default(uuid())
+  storyId   String   @map("story_id")
+  userId    String   @map("user_id")
+  emoji     String   @default("❤️")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  story     Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId])
+  @@map("story_reactions")
+}
+
+model StoryComment {
+  id        String         @id @default(uuid())
+  storyId   String         @map("story_id")
+  userId    String         @map("user_id")
+  parentId  String?        @map("parent_id")
+  content   String
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  story     Story          @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  parent    StoryComment?  @relation("CommentReplies", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  replies   StoryComment[] @relation("CommentReplies")
+
+  @@map("story_comments")
+}
+
+model StoryView {
+  id       String   @id @default(uuid())
+  storyId  String   @map("story_id")
+  userId   String   @map("user_id")
+  viewedAt DateTime @default(now()) @map("viewed_at")
+
+  story    Story    @relation(fields: [storyId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([storyId, userId])
+  @@map("story_views")
 }
 
 // ─────────────────────────────────────────

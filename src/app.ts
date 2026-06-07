@@ -11,6 +11,7 @@ import unionsRouter from './routes/unions';
 import famillesRouter from './routes/familles';
 import uploadsRouter from './routes/uploads';
 import syncRouter from './routes/sync';
+import storiesRouter from './routes/stories';
 import { prisma } from './lib/prisma';
 
 const app = express();
@@ -54,6 +55,7 @@ app.use('/api/personnes', personnesRouter);
 app.use('/api/unions', unionsRouter);
 app.use('/api/uploads', uploadsRouter);
 app.use('/api/sync', syncRouter);
+app.use('/api/stories', storiesRouter);
 
 // ── Health check ────────────────────────────────
 app.get('/health', (_req, res) => {
