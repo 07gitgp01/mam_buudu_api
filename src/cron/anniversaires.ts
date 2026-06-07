@@ -15,6 +15,7 @@ export async function checkAnniversaires(): Promise<void> {
 
     const personnes = await prisma.personne.findMany({
       where: {
+        
         dateNaissance: { endsWith: suffix },
         dateDeces: null,
       },
