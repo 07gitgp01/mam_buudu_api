@@ -54,6 +54,19 @@ const storyUpload = multer({
   },
 });
 
+// ── Multer — audio story (mp3, m4a, webm audio, ogg, 20 MB) ─
+const audioUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      'audio/mpeg', 'audio/mp4', 'audio/ogg', 'audio/wav',
+      'audio/webm', 'audio/aac', 'audio/x-m4a',
+    ];
+    cb(null, allowed.includes(file.mimetype));
+  },
+});
+
 // ── POST /api/uploads/photo/:personneId ─────────
 router.post(
   '/photo/:personneId',
@@ -174,6 +187,43 @@ router.post(
     } catch (err) {
       console.error('[cloudinary] story-media upload error:', err);
       res.status(500).json({ error: "Erreur lors de l'upload" });
+    }
+  }
+);
+
+// ── POST /api/uploads/story-audio ───────────────
+router.post(
+  '/story-audio',
+  audioUpload.single('audio'),
+  async (req: AuthRequest, res: Response): Promise<void> => {
+    if (!req.file) {
+      res.status(400).json({ error: 'Aucun fichier audio reçu' });
+      return;
+    }
+
+    try {
+      const result = await new Promise<{ secure_url: string; duration?: number }>((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          {
+            folder: `mam-buudu/${req.user!.familleId}/stories/audio`,
+            resource_type: 'video', // Cloudinary traite l'audio comme video
+          },
+          (err, result) => {
+            if (err || !result) return reject(err ?? new Error('Upload audio échoué'));
+            resolve(result as { secure_url: string; duration?: number });
+          }
+        );
+        stream.end(req.file!.buffer);
+      });
+
+      res.json({
+        mediaUrl:  result.secure_url,
+        mediaType: 'audio',
+        duration:  result.duration ?? null,
+      });
+    } catch (err) {
+      console.error('[cloudinary] story-audio upload error:', err);
+      res.status(500).json({ error: "Erreur lors de l'upload audio" });
     }
   }
 );
