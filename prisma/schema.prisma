@@ -55,6 +55,7 @@ model Famille {
   stories       Story[]
   photos        Photo[]
   notifications Notification[]
+  subscription  Subscription?
 
   @@map("familles")
 }
@@ -257,6 +258,56 @@ model Photo {
 
   @@index([personneId])
   @@map("photos")
+}
+
+// ─────────────────────────────────────────
+// FREEMIUM — PLANS & ABONNEMENTS
+// ─────────────────────────────────────────
+
+model Plan {
+  id           String  @id               // 'plan_gratuit' | 'plan_premium' | 'plan_famille_plus'
+  nom          String                    // slug
+  label        String                    // label affiché
+  prix         Int                       // FCFA/mois (0 = gratuit)
+  maxPersonnes Int?                      // null = illimité
+  features     Json                      // string[]
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id         String    @id @default(uuid())
+  familleId  String    @unique @map("famille_id")
+  planId     String    @map("plan_id")
+  statut     String    @default("actif")  // actif | expire | annule
+  dateDebut  DateTime  @map("date_debut")
+  dateFin    DateTime? @map("date_fin")   // null = gratuit/permanent
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  famille    Famille    @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  plan       Plan       @relation(fields: [planId], references: [id])
+  paiements  Paiement[]
+
+  @@map("subscriptions")
+}
+
+model Paiement {
+  id             String   @id @default(uuid())
+  subscriptionId String   @map("subscription_id")
+  transactionId  String   @unique @map("transaction_id")
+  montant        Int
+  statut         String   @default("pending")  // pending | success | failed
+  provider       String   @default("cinetpay")
+  metadata       Json?
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+
+  @@map("paiements")
 }
 
 // ─────────────────────────────────────────

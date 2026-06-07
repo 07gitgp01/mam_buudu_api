@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requireEdit } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { checkPersonneQuota } from '../lib/quota';
 
 const router = Router();
 router.use(requireAuth);
@@ -79,6 +80,18 @@ router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<v
   const { id, ...data } = parse.data;
 
   try {
+    // Vérification quota
+    const quota = await checkPersonneQuota(req.user!.familleId);
+    if (!quota.allowed) {
+      res.status(403).json({
+        error: `Limite de votre plan atteinte (${quota.limit} membres). Passez à un plan supérieur pour continuer.`,
+        code: 'QUOTA_EXCEEDED',
+        limit: quota.limit,
+        current: quota.current,
+      });
+      return;
+    }
+
     const personne = await prisma.personne.create({
       data: {
         ...(id ? { id } : {}), // conserve l'UUID local si fourni
