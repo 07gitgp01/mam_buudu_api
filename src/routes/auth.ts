@@ -704,10 +704,6 @@ router.post('/verify-email', async (req: Request, res: Response): Promise<void> 
 // ── GET /api/auth/test-email?to=xxx ──────────────────────────────────────────
 // Route temporaire de test SMTP — à supprimer en production
 router.get('/test-email', async (req: Request, res: Response): Promise<void> => {
-  if (process.env.NODE_ENV === 'production') {
-    res.status(404).json({ error: 'Not found' });
-    return;
-  }
   const to = req.query.to as string;
   if (!to) { res.status(400).json({ error: 'Paramètre ?to=email requis' }); return; }
 
