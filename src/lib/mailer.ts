@@ -1,42 +1,66 @@
+import { Resend } from 'resend';
 import nodemailer from 'nodemailer';
 
+// ── Resend (prioritaire si RESEND_API_KEY défini) ────────────────────────────
+function getResend(): Resend | null {
+  if (!process.env.RESEND_API_KEY) return null;
+  return new Resend(process.env.RESEND_API_KEY);
+}
+
+// ── SMTP nodemailer (fallback) ───────────────────────────────────────────────
 let _transport: nodemailer.Transporter | null = null;
 
-function getTransport(): nodemailer.Transporter | null {
+function getSmtpTransport(): nodemailer.Transporter | null {
   if (!process.env.SMTP_HOST) return null;
   if (!_transport) {
     _transport = nodemailer.createTransport({
       host:   process.env.SMTP_HOST,
       port:   parseInt(process.env.SMTP_PORT ?? '587'),
       secure: process.env.SMTP_SECURE === 'true',
-      auth: {
-        user: process.env.SMTP_USER,
-        pass: process.env.SMTP_PASS,
-      },
+      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
     });
   }
   return _transport;
 }
 
+// ── Interface commune ─────────────────────────────────────────────────────────
 export async function sendEmail(opts: { to: string; subject: string; html: string }): Promise<boolean> {
-  const t = getTransport();
-  if (!t) {
-    console.log(`[mailer] SMTP non configuré — email ignoré pour ${opts.to}`);
-    return false;
+  const resend = getResend();
+
+  if (resend) {
+    const from = process.env.SMTP_FROM ?? 'Mam Buudu <onboarding@resend.dev>';
+    try {
+      const { error } = await resend.emails.send({ from, ...opts });
+      if (error) {
+        console.error('[mailer/resend] Erreur:', error);
+        return false;
+      }
+      return true;
+    } catch (err) {
+      console.error('[mailer/resend] Exception:', err);
+      return false;
+    }
   }
-  try {
-    await t.sendMail({
-      from: process.env.SMTP_FROM ?? `"Mam Buudu" <${process.env.SMTP_USER}>`,
-      ...opts,
-    });
-    return true;
-  } catch (err) {
-    console.error('[mailer] Erreur envoi:', err);
-    return false;
+
+  const smtp = getSmtpTransport();
+  if (smtp) {
+    try {
+      await smtp.sendMail({
+        from: process.env.SMTP_FROM ?? `"Mam Buudu" <${process.env.SMTP_USER}>`,
+        ...opts,
+      });
+      return true;
+    } catch (err) {
+      console.error('[mailer/smtp] Erreur:', err);
+      return false;
+    }
   }
+
+  console.log(`[mailer] Aucun service email configuré — email ignoré pour ${opts.to}`);
+  return false;
 }
 
-// ── Templates ────────────────────────────────────────────────────────────────
+// ── Templates ─────────────────────────────────────────────────────────────────
 
 export function tplPasswordReset(nom: string, lien: string): string {
   return `

@@ -707,47 +707,15 @@ router.get('/test-email', async (req: Request, res: Response): Promise<void> => 
   const to = req.query.to as string;
   if (!to) { res.status(400).json({ error: 'Paramètre ?to=email requis' }); return; }
 
-  const cfg = {
-    smtp_host:   process.env.SMTP_HOST   ?? '(manquant)',
-    smtp_port:   process.env.SMTP_PORT   ?? '(manquant)',
-    smtp_secure: process.env.SMTP_SECURE ?? '(manquant)',
-    smtp_user:   process.env.SMTP_USER   ?? '(manquant)',
-    smtp_pass:   process.env.SMTP_PASS   ? `${process.env.SMTP_PASS.slice(0, 4)}****` : '(manquant)',
-    smtp_from:   process.env.SMTP_FROM   ?? '(manquant)',
-  };
+  const service = process.env.RESEND_API_KEY ? 'resend' : (process.env.SMTP_HOST ? 'smtp' : 'aucun');
 
-  if (!process.env.SMTP_HOST) {
-    res.json({ sent: false, erreur: 'SMTP_HOST non configuré', cfg });
-    return;
-  }
-
-  const nodemailer = await import('nodemailer');
-  const transport = nodemailer.createTransport({
-    host:   process.env.SMTP_HOST,
-    port:   parseInt(process.env.SMTP_PORT ?? '587'),
-    secure: process.env.SMTP_SECURE === 'true',
-    auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  const ok = await sendEmail({
+    to,
+    subject: '✅ Test email — Mam Buudu',
+    html: '<p>Si vous recevez cet email, la configuration fonctionne ! 🎉</p>',
   });
 
-  try {
-    await transport.verify();
-    console.log('[test-email] connexion SMTP OK');
-  } catch (err: any) {
-    res.json({ sent: false, etape: 'verify', erreur: err.message, cfg });
-    return;
-  }
-
-  try {
-    await transport.sendMail({
-      from:    process.env.SMTP_FROM ?? `"Mam Buudu" <${process.env.SMTP_USER}>`,
-      to,
-      subject: '✅ Test SMTP — Mam Buudu',
-      html:    '<p>Si vous recevez cet email, la configuration SMTP fonctionne ! 🎉</p>',
-    });
-    res.json({ sent: true, cfg });
-  } catch (err: any) {
-    res.json({ sent: false, etape: 'sendMail', erreur: err.message, cfg });
-  }
+  res.json({ sent: ok, service });
 });
 
 export default router;
