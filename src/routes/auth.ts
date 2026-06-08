@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { generateToken, generateViewonlyToken, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
-import { sendEmail, tplPasswordReset, tplEmailVerification } from '../lib/mailer';
+import { sendEmail, tplPasswordReset, tplEmailVerification, tplOtp } from '../lib/mailer';
 import { notifyUser, notifyFamille } from '../lib/notifications';
 
 const router = Router();
@@ -129,6 +129,91 @@ const completeProfileSchema = z.object({
   email: z.string().email().optional(),
 });
 
+// ── POST /api/auth/send-otp ──────────────────────────────────────────────────
+// Envoie un code OTP à l'email pour vérification avant inscription
+const otpLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 5,
+  message: { error: 'Trop de tentatives. Réessayez dans 1 heure.' } });
+
+router.post('/send-otp', otpLimit, async (req: Request, res: Response): Promise<void> => {
+  const { email } = req.body as { email?: string };
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    res.status(400).json({ error: 'Adresse email invalide' });
+    return;
+  }
+
+  try {
+    // Vérifier que l'email n'est pas déjà utilisé
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      res.status(409).json({ error: 'Cet email est déjà associé à un compte' });
+      return;
+    }
+
+    // Générer un code à 6 chiffres
+    const code      = String(Math.floor(100000 + Math.random() * 900000));
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
+
+    // Supprimer les anciens OTP pour cet email
+    await prisma.otpVerification.deleteMany({ where: { email } });
+
+    await prisma.otpVerification.create({
+      data: { email, code, expiresAt },
+    });
+
+    // Envoyer l'email (fire-and-forget pour la réponse)
+    sendEmail({ to: email, subject: 'Votre code Mam Buudu', html: tplOtp(code) });
+
+    res.json({ message: 'Code envoyé. Vérifiez votre boîte email.' });
+  } catch (err) {
+    console.error('[send-otp]', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// ── POST /api/auth/verify-otp ────────────────────────────────────────────────
+// Vérifie le code OTP et retourne un registrationToken (15 min)
+router.post('/verify-otp', async (req: Request, res: Response): Promise<void> => {
+  const { email, code } = req.body as { email?: string; code?: string };
+  if (!email || !code) {
+    res.status(400).json({ error: 'Email et code requis' });
+    return;
+  }
+
+  try {
+    const otp = await prisma.otpVerification.findFirst({
+      where: { email, verifiedAt: null },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    if (!otp) {
+      res.status(400).json({ error: 'Aucun code trouvé pour cet email. Renvoyez le code.' });
+      return;
+    }
+    if (otp.expiresAt < new Date()) {
+      res.status(400).json({ error: 'Code expiré. Demandez un nouveau code.' });
+      return;
+    }
+    if (otp.code !== code.trim()) {
+      res.status(400).json({ error: 'Code incorrect.' });
+      return;
+    }
+
+    // Marquer comme vérifié + générer un registrationToken valable 15 min
+    const registrationToken = randomBytes(32).toString('hex');
+    const tokenExpiresAt    = new Date(Date.now() + 15 * 60 * 1000);
+
+    await prisma.otpVerification.update({
+      where: { id: otp.id },
+      data: { verifiedAt: new Date(), registrationToken, tokenExpiresAt },
+    });
+
+    res.json({ registrationToken });
+  } catch (err) {
+    console.error('[verify-otp]', err);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
 // ── POST /api/auth/register ─────────────────────────────────────────────────
 
 router.post('/register', authLimit, async (req: Request, res: Response): Promise<void> => {
@@ -139,8 +224,22 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
   }
 
   const { email, telephone, password, nom, prenom, questionSecrete, reponseSecrete, nomFamille, codeUnique, lieu } = parse.data;
+  const { registrationToken } = req.body as { registrationToken?: string };
 
   try {
+    // Valider le registrationToken (issu de verify-otp)
+    if (!registrationToken) {
+      res.status(400).json({ error: 'Vérification email requise avant l\'inscription.' });
+      return;
+    }
+    const otp = await prisma.otpVerification.findUnique({
+      where: { registrationToken },
+    });
+    if (!otp || otp.email !== email || !otp.verifiedAt || !otp.tokenExpiresAt || otp.tokenExpiresAt < new Date()) {
+      res.status(400).json({ error: 'Token de vérification invalide ou expiré. Recommencez la vérification.' });
+      return;
+    }
+
     const existingEmail = await prisma.user.findUnique({ where: { email } });
     if (existingEmail) {
       res.status(409).json({ error: 'Cet email est déjà utilisé' });
@@ -176,7 +275,7 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
 
     const result = await prisma.$transaction(async (tx) => {
       const user = await tx.user.create({
-        data: { email, telephone, passwordHash, nom, prenom, questionSecrete, reponseHash },
+        data: { email, telephone, passwordHash, nom, prenom, questionSecrete, reponseHash, emailVerified: true },
       });
 
       const famille = await tx.famille.create({
@@ -202,7 +301,7 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
         id: result.user.id, email: result.user.email,
         telephone: result.user.telephone, nom: result.user.nom,
         prenom: result.user.prenom, role: 'admin',
-        hasCompletedProfile: true, emailVerified: false,
+        hasCompletedProfile: true, emailVerified: true,
       },
       famille: {
         id: result.famille.id, nom: result.famille.nom,
@@ -211,6 +310,9 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
         viewonlyPassword: result.famille.viewonlyPassword,
       },
     });
+
+    // Nettoyer l'OTP utilisé
+    prisma.otpVerification.deleteMany({ where: { email: result.user.email! } }).catch(() => {});
 
     // Notification de bienvenue pour le fondateur
     notifyUser(result.user.id, result.famille.id, {

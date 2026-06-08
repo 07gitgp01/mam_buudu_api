@@ -97,6 +97,24 @@ export function tplEmailVerification(nom: string, lien: string): string {
     </div>`;
 }
 
+export function tplOtp(code: string): string {
+  return `
+    <div style="font-family:sans-serif;max-width:520px;margin:auto;padding:32px">
+      <h2 style="color:#1e3a5f;margin-bottom:8px">Votre code de vérification</h2>
+      <p>Utilisez ce code pour finaliser votre inscription sur <strong>Mam Buudu</strong> :</p>
+      <div style="text-align:center;margin:32px 0">
+        <span style="display:inline-block;background:#f0f4ff;border:2px solid #2563eb;border-radius:12px;
+                     padding:16px 40px;font-size:36px;font-weight:800;letter-spacing:12px;color:#1e3a5f">
+          ${code}
+        </span>
+      </div>
+      <p style="color:#666;font-size:13px">Ce code est valable <strong>10 minutes</strong>. Ne le partagez avec personne.</p>
+      <p style="color:#999;font-size:12px">Si vous n'avez pas demandé ce code, ignorez cet email.</p>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0">
+      <p style="color:#aaa;font-size:12px;text-align:center">Mam Buudu — Votre arbre généalogique familial</p>
+    </div>`;
+}
+
 export function tplBirthday(nomDestinataire: string, nomFamille: string, nomAnniversaire: string, age: number | null): string {
   const ageText = age ? `${age} ans` : 'un anniversaire';
   return `
