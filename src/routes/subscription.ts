@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { checkPersonneQuota, FREE_LIMIT, FREE_PLAN_ID, getActiveSubscription } from '../lib/quota';
+import { notifyAdmins } from '../lib/notifications';
 
 const router = Router();
 
@@ -197,6 +198,16 @@ router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
       ]);
 
       console.log(`[webhook] subscription activée → plan ${planId} pour famille ${paiement.subscription.familleId}`);
+
+      // Notifier les admins de la famille
+      const plan = await prisma.plan.findUnique({ where: { id: planId }, select: { label: true } });
+      const dateFin2 = dateFin.toLocaleDateString('fr-FR', { day: '2-digit', month: 'long', year: 'numeric' });
+      notifyAdmins(paiement.subscription.familleId, {
+        type:    'paiement_confirme',
+        titre:   'Abonnement activé !',
+        message: `Plan "${plan?.label ?? planId}" actif jusqu'au ${dateFin2}.`,
+        data:    { planId, dateFin: dateFin.toISOString(), montant: paiement.montant },
+      });
     } else {
       await prisma.paiement.update({
         where: { id: paiement.id },

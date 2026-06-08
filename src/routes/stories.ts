@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requireEdit } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { notifyFamille, notifyUser } from '../lib/notifications';
 
 const router = Router();
 router.use(requireAuth);
@@ -150,6 +151,15 @@ router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<v
       { ...story, creatorPersonne: membre?.personne ?? null },
       req.user!.id
     ));
+
+    // Notifier tous les membres sauf l'auteur
+    const auteur = `${story.creator.prenom} ${story.creator.nom}`;
+    notifyFamille(req.user!.familleId, req.user!.id, {
+      type:    'nouvelle_story',
+      titre:   `Nouvelle story de ${auteur}`,
+      message: story.titre ? `"${story.titre}" — ${story.caption.slice(0, 80)}` : story.caption.slice(0, 100),
+      data:    { storyId: story.id, auteur, tag: story.tag ?? null },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -194,6 +204,24 @@ router.post('/:id/react', requireEdit, async (req: AuthRequest, res: Response): 
       update: { emoji: parse.data.emoji },
     });
     res.status(204).send();
+
+    // Notifier l'auteur de la story (sauf si c'est lui qui réagit)
+    const story = await prisma.story.findUnique({
+      where: { id: req.params.id },
+      select: { creatorId: true, familleId: true, titre: true, caption: true },
+    });
+    if (story && story.creatorId !== req.user!.id) {
+      const reactor = await prisma.user.findUnique({
+        where: { id: req.user!.id }, select: { nom: true, prenom: true },
+      });
+      const nom = reactor ? `${reactor.prenom} ${reactor.nom}` : 'Quelqu\'un';
+      notifyUser(story.creatorId, story.familleId, {
+        type:    'reaction_story',
+        titre:   `${nom} a réagi à votre story`,
+        message: `${parse.data.emoji} sur "${story.titre ?? story.caption.slice(0, 50)}"`,
+        data:    { storyId: req.params.id, emoji: parse.data.emoji },
+      });
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -278,6 +306,21 @@ router.post('/:id/comments', requireEdit, async (req: AuthRequest, res: Response
       include: { user: { select: { id: true, nom: true, prenom: true } } },
     });
     res.status(201).json(comment);
+
+    // Notifier l'auteur de la story (sauf si c'est lui qui commente)
+    const story = await prisma.story.findUnique({
+      where: { id: req.params.id },
+      select: { creatorId: true, familleId: true, titre: true, caption: true },
+    });
+    if (story && story.creatorId !== req.user!.id) {
+      const nom = `${comment.user.prenom} ${comment.user.nom}`;
+      notifyUser(story.creatorId, story.familleId, {
+        type:    'commentaire_story',
+        titre:   `${nom} a commenté votre story`,
+        message: parse.data.content.slice(0, 100),
+        data:    { storyId: req.params.id, commentId: comment.id },
+      });
+    }
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });

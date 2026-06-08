@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { notifyUser, notifyFamille } from '../lib/notifications';
 
 const router = Router();
 
@@ -179,7 +180,26 @@ router.post('/invite', async (req: AuthRequest, res: Response): Promise<void> =>
       update: {},
     });
 
+    const famille = await prisma.famille.findUnique({
+      where: { id: req.user!.familleId },
+      select: { nom: true },
+    });
+
     res.json({ message: `${cible.prenom} ${cible.nom} ajouté(e) à la famille` });
+
+    // Notifier la cible + toute la famille
+    notifyUser(cible.id, req.user!.familleId, {
+      type:    'bienvenue',
+      titre:   `Bienvenue sur Mam Buudu, ${cible.prenom} !`,
+      message: `Vous avez été invité(e) à rejoindre la famille "${famille?.nom ?? ''}".`,
+      data:    { familleId: req.user!.familleId },
+    });
+    notifyFamille(req.user!.familleId, cible.id, {
+      type:    'nouveau_membre',
+      titre:   `${cible.prenom} ${cible.nom} a rejoint la famille`,
+      message: `${cible.prenom} ${cible.nom} vient d'être invité(e) dans la famille.`,
+      data:    { userId: cible.id },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de l\'invitation' });

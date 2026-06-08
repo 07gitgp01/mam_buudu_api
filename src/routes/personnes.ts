@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth, requireEdit } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { checkPersonneQuota } from '../lib/quota';
+import { notifyFamille } from '../lib/notifications';
 
 const router = Router();
 router.use(requireAuth);
@@ -101,6 +102,17 @@ router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<v
     });
 
     res.status(201).json(personne);
+
+    // Notifier tous les membres de la famille
+    const nomComplet = [personne.prenoms, personne.nomNaissance].filter(Boolean).join(' ') || 'Inconnu';
+    notifyFamille(req.user!.familleId, null, {
+      type:    'nouveau_membre_arbre',
+      titre:   `${nomComplet} ajouté à l'arbre`,
+      message: personne.dateNaissance
+        ? `Né(e) le ${personne.dateNaissance}${personne.lieuNaissance ? ` à ${personne.lieuNaissance}` : ''}`
+        : 'Nouveau membre dans l\'arbre généalogique',
+      data:    { personneId: personne.id, nom: nomComplet, photoUrl: personne.photoUrl ?? null },
+    });
   } catch (err: unknown) {
     // Conflit d'ID unique (même UUID déjà en base)
     if ((err as { code?: string }).code === 'P2002') {

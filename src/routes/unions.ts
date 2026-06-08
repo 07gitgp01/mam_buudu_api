@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { notifyFamille } from '../lib/notifications';
 
 const router = Router();
 router.use(requireAuth);
@@ -128,6 +129,17 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
     });
 
     res.status(201).json(union);
+
+    // Notifier tous les membres de la famille
+    const noms = union.participants
+      .map(p => [p.personne.prenoms, p.personne.nomNaissance].filter(Boolean).join(' ') || 'Inconnu')
+      .join(' & ');
+    notifyFamille(req.user!.familleId, null, {
+      type:    'nouvelle_union',
+      titre:   'Nouvelle union enregistrée',
+      message: noms ? `Union de ${noms}` : 'Une nouvelle union a été ajoutée à l\'arbre',
+      data:    { unionId: union.id, type: union.type ?? null },
+    });
   } catch (err: unknown) {
     if ((err as { code?: string }).code === 'P2002') {
       res.status(409).json({ error: 'Cette union existe déjà' });

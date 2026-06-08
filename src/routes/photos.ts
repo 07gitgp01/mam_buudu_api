@@ -4,6 +4,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { prisma } from '../lib/prisma';
 import { requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { notifyFamille } from '../lib/notifications';
 
 const router = Router();
 router.use(requireAuth);
@@ -80,6 +81,15 @@ router.post('/:personneId', albumUpload.single('photo'), async (req: AuthRequest
     });
 
     res.status(201).json(photo);
+
+    // Notifier tous les membres (sauf l'uploader)
+    const nomPersonne = [personne.prenoms, personne.nomNaissance].filter(Boolean).join(' ') || 'Inconnu';
+    notifyFamille(req.user!.familleId, req.user!.id, {
+      type:    'photo_ajoutee',
+      titre:   `Nouvelle photo de ${nomPersonne}`,
+      message: caption ? `"${caption}"` : `Photo ajoutée à l'album de ${nomPersonne}`,
+      data:    { personneId, photoUrl: photo.url, nom: nomPersonne },
+    });
   } catch (err) {
     console.error('[photos POST]', err);
     res.status(500).json({ error: 'Erreur upload' });

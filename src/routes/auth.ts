@@ -7,6 +7,7 @@ import { prisma } from '../lib/prisma';
 import { generateToken, generateViewonlyToken, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { sendEmail, tplPasswordReset, tplEmailVerification } from '../lib/mailer';
+import { notifyUser, notifyFamille } from '../lib/notifications';
 
 const router = Router();
 
@@ -209,6 +210,14 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
         viewonlyUsername: result.famille.viewonlyUsername,
         viewonlyPassword: result.famille.viewonlyPassword,
       },
+    });
+
+    // Notification de bienvenue pour le fondateur
+    notifyUser(result.user.id, result.famille.id, {
+      type:    'bienvenue',
+      titre:   `Bienvenue sur Mam Buudu, ${result.user.prenom} !`,
+      message: `Votre famille "${result.famille.nom}" a été créée avec succès. Code famille : ${result.famille.codeUnique}`,
+      data:    { familleId: result.famille.id, codeUnique: result.famille.codeUnique },
     });
   } catch (err) {
     console.error(err);
@@ -417,9 +426,28 @@ router.post('/membres/create', requireAuth, async (req: AuthRequest, res: Respon
       return user;
     });
 
+    const famille = await prisma.famille.findUnique({
+      where: { id: req.user!.familleId },
+      select: { nom: true },
+    });
+
     res.status(201).json({
       message: `${prenom} ${nom} a été ajouté(e) comme ${role}`,
       membre: { id: result.id, email: result.email, telephone: result.telephone, nom: result.nom, prenom: result.prenom, role },
+    });
+
+    // Notifier le nouveau membre + toute la famille
+    notifyUser(result.id, req.user!.familleId, {
+      type:    'bienvenue',
+      titre:   `Bienvenue sur Mam Buudu, ${prenom} !`,
+      message: `Vous avez été ajouté(e) à la famille "${famille?.nom ?? ''}" en tant que ${role}.`,
+      data:    { familleId: req.user!.familleId, role },
+    });
+    notifyFamille(req.user!.familleId, result.id, {
+      type:    'nouveau_membre',
+      titre:   `${prenom} ${nom} a rejoint la famille`,
+      message: `${prenom} ${nom} a été ajouté(e) en tant que ${role}.`,
+      data:    { userId: result.id, role },
     });
   } catch (err) {
     console.error(err);
