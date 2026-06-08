@@ -312,9 +312,10 @@ router.post('/login', authLimit, async (req: Request, res: Response): Promise<vo
   }
 });
 
-// ── POST /api/auth/reset-password ────────────────────────────────────────────
+// ── POST /api/auth/reset-password-secret ─────────────────────────────────────
+// Ancienne méthode : réinitialisation par question secrète (conservée pour compat)
 
-router.post('/reset-password', authLimit, async (req: Request, res: Response): Promise<void> => {
+router.post('/reset-password-secret', authLimit, async (req: Request, res: Response): Promise<void> => {
   const parse = resetSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.errors[0].message });
