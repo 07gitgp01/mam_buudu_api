@@ -202,7 +202,7 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
         id: result.user.id, email: result.user.email,
         telephone: result.user.telephone, nom: result.user.nom,
         prenom: result.user.prenom, role: 'admin',
-        hasCompletedProfile: true,
+        hasCompletedProfile: true, emailVerified: false,
       },
       famille: {
         id: result.famille.id, nom: result.famille.nom,
@@ -311,7 +311,7 @@ router.post('/login', authLimit, async (req: Request, res: Response): Promise<vo
       user: {
         id: user.id, email: user.email, telephone: user.telephone,
         nom: user.nom, prenom: user.prenom, role: membre.role,
-        hasCompletedProfile,
+        hasCompletedProfile, emailVerified: user.emailVerified,
       },
       famille: { id: famille.id, nom: famille.nom, codeUnique: famille.codeUnique },
     });
@@ -728,23 +728,6 @@ router.post('/verify-email', async (req: Request, res: Response): Promise<void> 
     console.error('[verify-email]', err);
     res.status(500).json({ error: 'Erreur serveur' });
   }
-});
-
-// ── GET /api/auth/test-email?to=xxx ──────────────────────────────────────────
-// Route temporaire de test SMTP — à supprimer en production
-router.get('/test-email', async (req: Request, res: Response): Promise<void> => {
-  const to = req.query.to as string;
-  if (!to) { res.status(400).json({ error: 'Paramètre ?to=email requis' }); return; }
-
-  const service = process.env.RESEND_API_KEY ? 'resend' : (process.env.SMTP_HOST ? 'smtp' : 'aucun');
-
-  const ok = await sendEmail({
-    to,
-    subject: '✅ Test email — Mam Buudu',
-    html: '<p>Si vous recevez cet email, la configuration fonctionne ! 🎉</p>',
-  });
-
-  res.json({ sent: ok, service });
 });
 
 export default router;
