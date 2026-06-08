@@ -18,6 +18,7 @@ import notificationsRouter from './routes/notifications';
 import exportRouter from './routes/export';
 import subscriptionRouter from './routes/subscription';
 import timelineRouter from './routes/timeline';
+import superadminRouter from './routes/superadmin';
 import { startCronJobs } from './cron/anniversaires';
 import { seedPlans } from './lib/quota';
 import { prisma } from './lib/prisma';
@@ -70,6 +71,7 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/export',        exportRouter);
 app.use('/api/subscription',  subscriptionRouter);
 app.use('/api/timeline',      timelineRouter);
+app.use('/api/superadmin',    superadminRouter);
 
 // ── Health check ────────────────────────────────
 app.get('/health', (_req, res) => {

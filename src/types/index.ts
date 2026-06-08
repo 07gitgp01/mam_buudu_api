@@ -8,3 +8,10 @@ export interface AuthRequest extends Request {
     isViewonly?: boolean;
   };
 }
+
+export interface SuperAdminRequest extends Request {
+  superadmin?: {
+    id: string;
+    platformRole: string;
+  };
+}

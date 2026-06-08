@@ -24,6 +24,8 @@ model User {
   questionSecrete  String?  @map("question_secrete")
   reponseHash      String?  @map("reponse_hash")
   emailVerified    Boolean  @default(false) @map("email_verified")
+  platformRole     String?  @map("platform_role")
+  suspended        Boolean  @default(false)
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @updatedAt @map("updated_at")
 
@@ -50,6 +52,7 @@ model Famille {
   viewonlyUsername      String?  @unique @map("viewonly_username")
   viewonlyPassword      String?  @map("viewonly_password")
   viewonlyPasswordHash  String?  @map("viewonly_password_hash")
+  statut                String   @default("actif")
   createdAt             DateTime @default(now()) @map("created_at")
   updatedAt             DateTime @updatedAt @map("updated_at")
 
@@ -409,6 +412,20 @@ model TimelineEvent {
 
   @@index([familleId])
   @@map("timeline_events")
+}
+
+// ─────────────────────────────────────────
+// PLATEFORME ADMIN
+// ─────────────────────────────────────────
+
+model PlatformSetting {
+  key       String   @id
+  value     String
+  label     String?
+  updatedAt DateTime @updatedAt @map("updated_at")
+  updatedBy String?  @map("updated_by")
+
+  @@map("platform_settings")
 }
 
 // ─────────────────────────────────────────
