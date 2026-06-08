@@ -7,6 +7,7 @@ import { prisma } from '../lib/prisma';
 import { generateToken, generateViewonlyToken, requireAuth } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { sendEmail, tplPasswordReset, tplEmailVerification, tplOtp } from '../lib/mailer';
+import { sendSms } from '../lib/sms';
 import { notifyUser, notifyFamille } from '../lib/notifications';
 
 const router = Router();
@@ -65,13 +66,16 @@ const registerSchema = z.object({
   nomFamille: z.string().min(1, 'Nom de famille requis'),
   codeUnique: z.string().min(4).max(12).regex(/^[A-Z0-9]+$/, 'Code invalide').optional(),
   lieu: z.string().optional(),
-  email: z.string().email('Email invalide'),
-  telephone: z.string().optional(),
+  email: z.string().email('Email invalide').optional(),
+  telephone: z.string().min(7, 'Numéro invalide').optional(),
   password: z.string().min(8, 'Minimum 8 caractères'),
   nom: z.string().min(1, 'Nom requis'),
   prenom: z.string().min(1, 'Prénom requis'),
   questionSecrete: z.string().min(1, 'Question secrète requise'),
   reponseSecrete: z.string().min(1, 'Réponse secrète requise'),
+}).refine(d => d.email || d.telephone, {
+  message: 'Email ou numéro de téléphone requis',
+  path: ['email'],
 });
 
 const loginEmailSchema = z.object({
@@ -129,41 +133,58 @@ const completeProfileSchema = z.object({
   email: z.string().email().optional(),
 });
 
+// ── Utilitaire normalisation téléphone ───────────────────────────────────────
+function normalizePhone(phone: string): string {
+  const s = phone.trim().replace(/\s/g, '');
+  if (s.startsWith('00')) return '+' + s.slice(2);
+  return s;
+}
+
 // ── POST /api/auth/send-otp ──────────────────────────────────────────────────
-// Envoie un code OTP à l'email pour vérification avant inscription
+// Envoie un OTP par email ou par SMS avant inscription
 const otpLimit = rateLimit({ windowMs: 60 * 60 * 1000, max: 5,
   message: { error: 'Trop de tentatives. Réessayez dans 1 heure.' } });
 
 router.post('/send-otp', otpLimit, async (req: Request, res: Response): Promise<void> => {
-  const { email } = req.body as { email?: string };
-  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  const { email, telephone } = req.body as { email?: string; telephone?: string };
+  const useEmail = !!email;
+  const useTel   = !useEmail && !!telephone;
+
+  if (!useEmail && !useTel) {
+    res.status(400).json({ error: 'Email ou numéro de téléphone requis' });
+    return;
+  }
+  if (useEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email!)) {
     res.status(400).json({ error: 'Adresse email invalide' });
     return;
   }
 
   try {
-    // Vérifier que l'email n'est pas déjà utilisé
-    const existing = await prisma.user.findUnique({ where: { email } });
-    if (existing) {
-      res.status(409).json({ error: 'Cet email est déjà associé à un compte' });
-      return;
-    }
-
-    // Générer un code à 6 chiffres
     const code      = String(Math.floor(100000 + Math.random() * 900000));
     const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 min
 
-    // Supprimer les anciens OTP pour cet email
-    await prisma.otpVerification.deleteMany({ where: { email } });
-
-    await prisma.otpVerification.create({
-      data: { email, code, expiresAt },
-    });
-
-    // Envoyer l'email (fire-and-forget pour la réponse)
-    sendEmail({ to: email, subject: 'Votre code Mam Buudu', html: tplOtp(code) });
-
-    res.json({ message: 'Code envoyé. Vérifiez votre boîte email.' });
+    if (useEmail) {
+      const existing = await prisma.user.findUnique({ where: { email: email! } });
+      if (existing) {
+        res.status(409).json({ error: 'Cet email est déjà associé à un compte' });
+        return;
+      }
+      await prisma.otpVerification.deleteMany({ where: { email: email! } });
+      await prisma.otpVerification.create({ data: { email: email!, code, expiresAt } });
+      sendEmail({ to: email!, subject: 'Votre code Mam Buudu', html: tplOtp(code) });
+      res.json({ message: 'Code envoyé. Vérifiez votre boîte email.' });
+    } else {
+      const tel = normalizePhone(telephone!);
+      const existing = await prisma.user.findUnique({ where: { telephone: tel } });
+      if (existing) {
+        res.status(409).json({ error: 'Ce numéro est déjà associé à un compte' });
+        return;
+      }
+      await prisma.otpVerification.deleteMany({ where: { telephone: tel } });
+      await prisma.otpVerification.create({ data: { telephone: tel, code, expiresAt } });
+      sendSms({ to: tel, message: `Mam Buudu - Code de vérification : ${code}. Valable 10 minutes.` });
+      res.json({ message: 'Code envoyé par SMS.' });
+    }
   } catch (err) {
     console.error('[send-otp]', err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -173,20 +194,25 @@ router.post('/send-otp', otpLimit, async (req: Request, res: Response): Promise<
 // ── POST /api/auth/verify-otp ────────────────────────────────────────────────
 // Vérifie le code OTP et retourne un registrationToken (15 min)
 router.post('/verify-otp', async (req: Request, res: Response): Promise<void> => {
-  const { email, code } = req.body as { email?: string; code?: string };
-  if (!email || !code) {
-    res.status(400).json({ error: 'Email et code requis' });
+  const { email, telephone, code } = req.body as { email?: string; telephone?: string; code?: string };
+  const contact = email || telephone;
+  if (!contact || !code) {
+    res.status(400).json({ error: 'Email (ou téléphone) et code requis' });
     return;
   }
 
   try {
+    const where = email
+      ? { email,                        verifiedAt: null as null }
+      : { telephone: normalizePhone(telephone!), verifiedAt: null as null };
+
     const otp = await prisma.otpVerification.findFirst({
-      where: { email, verifiedAt: null },
+      where,
       orderBy: { createdAt: 'desc' },
     });
 
     if (!otp) {
-      res.status(400).json({ error: 'Aucun code trouvé pour cet email. Renvoyez le code.' });
+      res.status(400).json({ error: 'Aucun code trouvé. Renvoyez le code.' });
       return;
     }
     if (otp.expiresAt < new Date()) {
@@ -198,13 +224,12 @@ router.post('/verify-otp', async (req: Request, res: Response): Promise<void> =>
       return;
     }
 
-    // Marquer comme vérifié + générer un registrationToken valable 15 min
     const registrationToken = randomBytes(32).toString('hex');
     const tokenExpiresAt    = new Date(Date.now() + 15 * 60 * 1000);
 
     await prisma.otpVerification.update({
       where: { id: otp.id },
-      data: { verifiedAt: new Date(), registrationToken, tokenExpiresAt },
+      data:  { verifiedAt: new Date(), registrationToken, tokenExpiresAt },
     });
 
     res.json({ registrationToken });
@@ -229,21 +254,30 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
   try {
     // Valider le registrationToken (issu de verify-otp)
     if (!registrationToken) {
-      res.status(400).json({ error: 'Vérification email requise avant l\'inscription.' });
+      res.status(400).json({ error: 'Vérification requise avant l\'inscription.' });
       return;
     }
-    const otp = await prisma.otpVerification.findUnique({
-      where: { registrationToken },
-    });
-    if (!otp || otp.email !== email || !otp.verifiedAt || !otp.tokenExpiresAt || otp.tokenExpiresAt < new Date()) {
+    const otp = await prisma.otpVerification.findUnique({ where: { registrationToken } });
+    if (!otp || !otp.verifiedAt || !otp.tokenExpiresAt || otp.tokenExpiresAt < new Date()) {
       res.status(400).json({ error: 'Token de vérification invalide ou expiré. Recommencez la vérification.' });
       return;
     }
-
-    const existingEmail = await prisma.user.findUnique({ where: { email } });
-    if (existingEmail) {
-      res.status(409).json({ error: 'Cet email est déjà utilisé' });
+    // Vérifier que le contact correspond à ce qui a été vérifié
+    if (email && otp.email !== email) {
+      res.status(400).json({ error: 'L\'email ne correspond pas à la vérification.' });
       return;
+    }
+    if (telephone && otp.telephone !== telephone) {
+      res.status(400).json({ error: 'Le téléphone ne correspond pas à la vérification.' });
+      return;
+    }
+
+    if (email) {
+      const existingEmail = await prisma.user.findUnique({ where: { email } });
+      if (existingEmail) {
+        res.status(409).json({ error: 'Cet email est déjà utilisé' });
+        return;
+      }
     }
 
     if (telephone) {
@@ -312,7 +346,11 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
     });
 
     // Nettoyer l'OTP utilisé
-    prisma.otpVerification.deleteMany({ where: { email: result.user.email! } }).catch(() => {});
+    if (result.user.email) {
+      prisma.otpVerification.deleteMany({ where: { email: result.user.email } }).catch(() => {});
+    } else if (result.user.telephone) {
+      prisma.otpVerification.deleteMany({ where: { telephone: result.user.telephone } }).catch(() => {});
+    }
 
     // Notification de bienvenue pour le fondateur
     notifyUser(result.user.id, result.famille.id, {

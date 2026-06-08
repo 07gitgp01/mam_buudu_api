@@ -370,10 +370,11 @@ model EmailVerification {
   @@map("email_verifications")
 }
 
-// OTP pré-inscription (vérifie l'email avant la création du compte)
+// OTP pré-inscription (vérifie l'email OU le téléphone avant la création du compte)
 model OtpVerification {
   id                String    @id @default(uuid())
-  email             String
+  email             String?                                       // null si inscription par téléphone
+  telephone         String?                                       // null si inscription par email
   code              String    // 6 chiffres
   registrationToken String?   @unique @map("registration_token") // généré après vérif, valable 15 min
   tokenExpiresAt    DateTime? @map("token_expires_at")
@@ -382,6 +383,7 @@ model OtpVerification {
   createdAt         DateTime  @default(now()) @map("created_at")
 
   @@index([email])
+  @@index([telephone])
   @@index([registrationToken])
   @@map("otp_verifications")
 }
