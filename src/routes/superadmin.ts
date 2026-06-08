@@ -241,4 +241,138 @@ router.delete('/settings/:key', requireSuperAdmin, requireRole('superadmin'), as
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
+// ── GET /api/superadmin/revenue ──────────────────────────────────────────────
+// Revenus mensuels sur les 12 derniers mois (pour le graphique)
+router.get('/revenue', requireSuperAdmin, async (_req, res) => {
+  try {
+    const months: { label: string; montant: number }[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const now = new Date();
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end   = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      const result = await prisma.paiement.aggregate({
+        _sum: { montant: true },
+        where: { statut: 'success', createdAt: { gte: start, lt: end } },
+      });
+      months.push({
+        label: start.toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' }),
+        montant: result._sum.montant ?? 0,
+      });
+    }
+    res.json(months);
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── GET /api/superadmin/activity ─────────────────────────────────────────────
+// Fil d'activité récente de la plateforme
+router.get('/activity', requireSuperAdmin, async (_req, res) => {
+  try {
+    const [recentUsers, recentFamilles, recentSubs, recentPaiements] = await Promise.all([
+      prisma.user.findMany({ orderBy: { createdAt: 'desc' }, take: 6, select: { prenom: true, nom: true, email: true, createdAt: true } }),
+      prisma.famille.findMany({ orderBy: { createdAt: 'desc' }, take: 6, select: { nom: true, codeUnique: true, createdAt: true } }),
+      prisma.subscription.findMany({ orderBy: { createdAt: 'desc' }, take: 6, include: { famille: { select: { nom: true } }, plan: { select: { label: true } } } }),
+      prisma.paiement.findMany({ where: { statut: 'success' }, orderBy: { createdAt: 'desc' }, take: 6, include: { subscription: { include: { famille: { select: { nom: true } } } } } }),
+    ]);
+    const feed = [
+      ...recentUsers.map((u: any) => ({ type: 'user',    icon: 'person_add',     label: `${u.prenom} ${u.nom}`,                        sub: u.email ?? '',                              at: u.createdAt })),
+      ...recentFamilles.map((f: any) => ({ type: 'famille', icon: 'family_restroom', label: `Nouvelle famille : ${f.nom}`,                  sub: f.codeUnique ?? '',                         at: f.createdAt })),
+      ...recentSubs.map((s: any) => ({ type: 'sub',     icon: 'subscriptions',   label: `Abonnement ${s.plan?.label ?? ''}`,            sub: s.famille?.nom ?? '',                       at: s.createdAt })),
+      ...recentPaiements.map((p: any) => ({ type: 'payment', icon: 'payments',        label: `Paiement ${(p.montant as number).toLocaleString('fr-FR')} FCFA`, sub: p.subscription?.famille?.nom ?? '', at: p.createdAt })),
+    ].sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()).slice(0, 15);
+    res.json(feed);
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── POST /api/superadmin/familles/:id/assign-plan ────────────────────────────
+router.post('/familles/:id/assign-plan', requireSuperAdmin, requireRole('superadmin', 'platform_admin'), async (req: SuperAdminRequest, res: Response): Promise<void> => {
+  const { planId, dateFin } = req.body as { planId: string; dateFin?: string };
+  if (!planId) { res.status(400).json({ error: 'planId requis' }); return; }
+  try {
+    const sub = await prisma.subscription.upsert({
+      where: { familleId: req.params['id'] },
+      create: { familleId: req.params['id'], planId, statut: 'actif', dateDebut: new Date(), dateFin: dateFin ? new Date(dateFin) : null },
+      update: { planId, statut: 'actif', dateDebut: new Date(), dateFin: dateFin ? new Date(dateFin) : null },
+      include: { plan: true },
+    });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'assign_plan', targetType: 'famille', targetId: req.params['id'], details: { planId, dateFin: dateFin ?? null } } });
+    res.json(sub);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── GET /api/superadmin/audit ─────────────────────────────────────────────────
+router.get('/audit', requireSuperAdmin, async (req: SuperAdminRequest, res: Response): Promise<void> => {
+  const page  = Math.max(1, parseInt(req.query['page'] as string) || 1);
+  const limit = Math.min(100, parseInt(req.query['limit'] as string) || 30);
+  try {
+    const [logs, total] = await Promise.all([
+      prisma.auditLog.findMany({
+        skip: (page - 1) * limit, take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: { admin: { select: { nom: true, prenom: true, email: true } } },
+      }),
+      prisma.auditLog.count(),
+    ]);
+    res.json({ logs, total, page, pages: Math.ceil(total / limit) });
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── GET /api/superadmin/export/familles ───────────────────────────────────────
+router.get('/export/familles', requireSuperAdmin, requireRole('superadmin'), async (_req, res) => {
+  try {
+    const familles = await prisma.famille.findMany({
+      include: { _count: { select: { membres: true, personnes: true } }, subscription: { include: { plan: true } } },
+      orderBy: { createdAt: 'asc' },
+    });
+    const header = 'id,nom,code,statut,membres,personnes,plan,abonnement,createdAt\n';
+    const rows = familles.map((f: any) =>
+      [f.id, `"${f.nom}"`, f.codeUnique ?? '', f.statut, f._count.membres, f._count.personnes, f.subscription?.plan?.label ?? 'gratuit', f.subscription?.statut ?? '', new Date(f.createdAt).toISOString()].join(',')
+    ).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="familles.csv"');
+    res.send('﻿' + header + rows);
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── GET /api/superadmin/export/users ─────────────────────────────────────────
+router.get('/export/users', requireSuperAdmin, requireRole('superadmin'), async (_req, res) => {
+  try {
+    const users = await prisma.user.findMany({
+      select: { id: true, email: true, telephone: true, nom: true, prenom: true, platformRole: true, suspended: true, emailVerified: true, createdAt: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    const header = 'id,prenom,nom,email,telephone,platformRole,suspended,emailVerified,createdAt\n';
+    const rows = users.map((u: any) =>
+      [u.id, u.prenom, u.nom, u.email ?? '', u.telephone ?? '', u.platformRole ?? '', u.suspended, u.emailVerified, new Date(u.createdAt).toISOString()].join(',')
+    ).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="users.csv"');
+    res.send('﻿' + header + rows);
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── POST /api/superadmin/broadcast ───────────────────────────────────────────
+// Envoyer une notification à tous les membres actifs de la plateforme
+router.post('/broadcast', requireSuperAdmin, requireRole('superadmin'), async (req: SuperAdminRequest, res: Response): Promise<void> => {
+  const { titre, message } = req.body as { titre: string; message: string };
+  if (!titre || !message) { res.status(400).json({ error: 'Titre et message requis' }); return; }
+  try {
+    const membres = await prisma.familleMembre.findMany({ select: { userId: true, familleId: true } });
+    const result  = await prisma.notification.createMany({
+      data: membres.map(m => ({ userId: m.userId, familleId: m.familleId, type: 'plateforme', titre, message })),
+      skipDuplicates: false,
+    });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'broadcast', details: { titre, sent: result.count } } });
+    res.json({ sent: result.count });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── DELETE /api/superadmin/plans/:id ──────────────────────────────────────────
+router.delete('/plans/:id', requireSuperAdmin, requireRole('superadmin'), async (req: SuperAdminRequest, res: Response): Promise<void> => {
+  try {
+    await prisma.plan.delete({ where: { id: req.params['id'] } });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'delete_plan', targetType: 'plan', targetId: req.params['id'] } });
+    res.json({ message: 'Plan supprimé' });
+  } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
 export default router;

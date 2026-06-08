@@ -39,6 +39,7 @@ model User {
   passwordResets   PasswordReset[]
   emailVerifications EmailVerification[]
   timelineEvents     TimelineEvent[]
+  auditLogs          AuditLog[]
 
   @@map("users")
 }
@@ -426,6 +427,22 @@ model PlatformSetting {
   updatedBy String?  @map("updated_by")
 
   @@map("platform_settings")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  adminId    String?  @map("admin_id")
+  action     String   // suspend_famille | delete_famille | assign_plan | delete_user | change_role | broadcast | change_setting
+  targetType String?  @map("target_type") // famille | user | plan | setting
+  targetId   String?  @map("target_id")
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  admin      User?    @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([adminId])
+  @@index([createdAt])
+  @@map("audit_logs")
 }
 
 // ─────────────────────────────────────────
