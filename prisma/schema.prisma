@@ -36,6 +36,7 @@ model User {
   notifications    Notification[]
   passwordResets   PasswordReset[]
   emailVerifications EmailVerification[]
+  timelineEvents     TimelineEvent[]
 
   @@map("users")
 }
@@ -53,12 +54,13 @@ model Famille {
   updatedAt             DateTime @updatedAt @map("updated_at")
 
   membres       FamilleMembre[]
-  personnes     Personne[]
-  unions        Union[]
-  stories       Story[]
-  photos        Photo[]
-  notifications Notification[]
-  subscription  Subscription?
+  personnes      Personne[]
+  unions         Union[]
+  stories        Story[]
+  photos         Photo[]
+  notifications  Notification[]
+  subscription   Subscription?
+  timelineEvents TimelineEvent[]
 
   @@map("familles")
 }
@@ -366,6 +368,29 @@ model EmailVerification {
 
   @@index([token])
   @@map("email_verifications")
+}
+
+// ─────────────────────────────────────────
+// TIMELINE
+// ─────────────────────────────────────────
+
+model TimelineEvent {
+  id          String   @id @default(uuid())
+  familleId   String   @map("famille_id")
+  creatorId   String?  @map("creator_id")
+  titre       String
+  description String?
+  type        String   @default("autre") // naissance, mariage, deces, succes, voyage, autre
+  date        String   // YYYY, YYYY-MM ou YYYY-MM-DD
+  personne    String?  // nom libre, non FK
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  famille  Famille @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  creator  User?   @relation(fields: [creatorId], references: [id], onDelete: SetNull)
+
+  @@index([familleId])
+  @@map("timeline_events")
 }
 
 // ─────────────────────────────────────────

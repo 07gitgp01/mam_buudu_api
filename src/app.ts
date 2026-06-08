@@ -17,6 +17,7 @@ import photosRouter from './routes/photos';
 import notificationsRouter from './routes/notifications';
 import exportRouter from './routes/export';
 import subscriptionRouter from './routes/subscription';
+import timelineRouter from './routes/timeline';
 import { startCronJobs } from './cron/anniversaires';
 import { seedPlans } from './lib/quota';
 import { prisma } from './lib/prisma';
@@ -68,6 +69,7 @@ app.use('/api/photos',        photosRouter);
 app.use('/api/notifications', notificationsRouter);
 app.use('/api/export',        exportRouter);
 app.use('/api/subscription',  subscriptionRouter);
+app.use('/api/timeline',      timelineRouter);
 
 // ── Health check ────────────────────────────────
 app.get('/health', (_req, res) => {
