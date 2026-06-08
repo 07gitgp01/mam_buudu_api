@@ -249,29 +249,8 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
   }
 
   const { email, telephone, password, nom, prenom, questionSecrete, reponseSecrete, nomFamille, codeUnique, lieu } = parse.data;
-  const { registrationToken } = req.body as { registrationToken?: string };
 
   try {
-    // Valider le registrationToken (issu de verify-otp)
-    if (!registrationToken) {
-      res.status(400).json({ error: 'Vérification requise avant l\'inscription.' });
-      return;
-    }
-    const otp = await prisma.otpVerification.findUnique({ where: { registrationToken } });
-    if (!otp || !otp.verifiedAt || !otp.tokenExpiresAt || otp.tokenExpiresAt < new Date()) {
-      res.status(400).json({ error: 'Token de vérification invalide ou expiré. Recommencez la vérification.' });
-      return;
-    }
-    // Vérifier que le contact correspond à ce qui a été vérifié
-    if (email && otp.email !== email) {
-      res.status(400).json({ error: 'L\'email ne correspond pas à la vérification.' });
-      return;
-    }
-    if (telephone && otp.telephone !== telephone) {
-      res.status(400).json({ error: 'Le téléphone ne correspond pas à la vérification.' });
-      return;
-    }
-
     if (email) {
       const existingEmail = await prisma.user.findUnique({ where: { email } });
       if (existingEmail) {
@@ -344,13 +323,6 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
         viewonlyPassword: result.famille.viewonlyPassword,
       },
     });
-
-    // Nettoyer l'OTP utilisé
-    if (result.user.email) {
-      prisma.otpVerification.deleteMany({ where: { email: result.user.email } }).catch(() => {});
-    } else if (result.user.telephone) {
-      prisma.otpVerification.deleteMany({ where: { telephone: result.user.telephone } }).catch(() => {});
-    }
 
     // Notification de bienvenue pour le fondateur
     notifyUser(result.user.id, result.famille.id, {
