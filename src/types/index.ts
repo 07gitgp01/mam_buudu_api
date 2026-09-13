@@ -6,6 +6,7 @@ export interface AuthRequest extends Request {
     email: string | null;
     familleId: string;
     isViewonly?: boolean;
+    role?: string;
   };
 }
 

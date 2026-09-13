@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { requireAuth, requireEdit } from '../middleware/auth';
+import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { checkPersonneQuota } from '../lib/quota';
 import { notifyFamille } from '../lib/notifications';
@@ -71,7 +71,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ── POST /api/personnes ─────────────────────────
-router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = personneSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.errors[0].message });
@@ -125,7 +125,7 @@ router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<v
 });
 
 // ── PUT /api/personnes/:id ──────────────────────
-router.put('/:id', requireEdit, async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = personneSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.errors[0].message });
@@ -155,7 +155,7 @@ router.put('/:id', requireEdit, async (req: AuthRequest, res: Response): Promise
 });
 
 // ── DELETE /api/personnes/:id ───────────────────
-router.delete('/:id', requireEdit, async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const existing = await prisma.personne.findFirst({
       where: { id: req.params.id, familleId: req.user!.familleId },

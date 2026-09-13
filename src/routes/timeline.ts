@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 
 const router = Router();
@@ -30,7 +30,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ── POST /api/timeline ────────────────────────────────────────────────────────
-router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   if (req.user?.isViewonly) {
     res.status(403).json({ error: 'Accès refusé' });
     return;
@@ -62,7 +62,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ── PUT /api/timeline/:id ─────────────────────────────────────────────────────
-router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   if (req.user?.isViewonly) {
     res.status(403).json({ error: 'Accès refusé' });
     return;
@@ -101,7 +101,7 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ── DELETE /api/timeline/:id ──────────────────────────────────────────────────
-router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   if (req.user?.isViewonly) {
     res.status(403).json({ error: 'Accès refusé' });
     return;

@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
 import { prisma } from '../lib/prisma';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 
 const router = Router();
@@ -70,6 +70,7 @@ const audioUpload = multer({
 // ── POST /api/uploads/photo/:personneId ─────────
 router.post(
   '/photo/:personneId',
+  requireManage,
   upload.single('photo'),
   async (req: AuthRequest, res: Response): Promise<void> => {
     if (!req.file) {
@@ -123,7 +124,7 @@ router.post(
 );
 
 // ── DELETE /api/uploads/photo/:personneId ───────
-router.delete('/photo/:personneId', async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete('/photo/:personneId', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const personne = await prisma.personne.findFirst({
       where: { id: req.params.personneId, familleId: req.user!.familleId },

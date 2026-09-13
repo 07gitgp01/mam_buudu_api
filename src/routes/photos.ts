@@ -2,7 +2,7 @@ import { Router, Response } from 'express';
 import multer from 'multer';
 import { v2 as cloudinary } from 'cloudinary';
 import { prisma } from '../lib/prisma';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { notifyFamille } from '../lib/notifications';
 
@@ -45,7 +45,7 @@ router.get('/:personneId', async (req: AuthRequest, res: Response): Promise<void
 });
 
 // ── POST /api/photos/:personneId ─────────────────────────
-router.post('/:personneId', albumUpload.single('photo'), async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/:personneId', requireManage, albumUpload.single('photo'), async (req: AuthRequest, res: Response): Promise<void> => {
   const { personneId } = req.params;
   const { caption, datePrise, lieuPrise } = req.body;
 
@@ -97,7 +97,7 @@ router.post('/:personneId', albumUpload.single('photo'), async (req: AuthRequest
 });
 
 // ── DELETE /api/photos/:photoId ──────────────────────────
-router.delete('/:photoId', async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete('/:photoId', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const { photoId } = req.params;
   try {
     const photo = await prisma.photo.findFirst({
@@ -120,7 +120,7 @@ router.delete('/:photoId', async (req: AuthRequest, res: Response): Promise<void
 });
 
 // ── PATCH /api/photos/:photoId ───────────────────────────
-router.patch('/:photoId', async (req: AuthRequest, res: Response): Promise<void> => {
+router.patch('/:photoId', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const { photoId } = req.params;
   const { caption, datePrise, lieuPrise } = req.body;
   try {

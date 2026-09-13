@@ -54,13 +54,15 @@ export async function requireAuth(
       return;
     }
 
-    req.user = { id: decoded.userId, email: decoded.email, familleId: decoded.familleId };
+    req.user = { id: decoded.userId, email: decoded.email, familleId: decoded.familleId, role: membre.role };
     next();
   } catch {
     res.status(401).json({ error: 'Token expiré ou invalide' });
   }
 }
 
+// Bloque uniquement les liens de partage "lecture seule" (isViewonly).
+// Utilisé pour les contenus que tout membre de la famille peut créer (ex. stories).
 export function requireEdit(
   req: AuthRequest,
   res: Response,
@@ -68,6 +70,21 @@ export function requireEdit(
 ): void {
   if (req.user?.isViewonly) {
     res.status(403).json({ error: 'Accès en lecture seule. Connectez-vous avec un compte personnel pour modifier les données.' });
+    return;
+  }
+  next();
+}
+
+// Bloque les liens "lecture seule" ET les comptes membre simples (rôle 'membre').
+// Utilisé pour les données de gestion de l'arbre (personnes, unions, timeline, photos)
+// réservées aux rôles admin/gestionnaire.
+export function requireManage(
+  req: AuthRequest,
+  res: Response,
+  next: NextFunction
+): void {
+  if (req.user?.isViewonly || req.user?.role === 'membre') {
+    res.status(403).json({ error: 'Action réservée aux administrateurs et gestionnaires de la famille.' });
     return;
   }
   next();

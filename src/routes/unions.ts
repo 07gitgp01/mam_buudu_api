@@ -1,7 +1,7 @@
 import { Router, Response } from 'express';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { requireAuth } from '../middleware/auth';
+import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { notifyFamille } from '../lib/notifications';
 
@@ -78,7 +78,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ── POST /api/unions ────────────────────────────
-router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = unionSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.errors[0].message });
@@ -151,7 +151,7 @@ router.post('/', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ── PUT /api/unions/:id ─────────────────────────
-router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = unionSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.errors[0].message });
@@ -218,7 +218,7 @@ router.put('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
 });
 
 // ── DELETE /api/unions/:id ──────────────────────
-router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const existing = await prisma.union.findFirst({
       where: { id: req.params.id, familleId: req.user!.familleId },
@@ -238,7 +238,7 @@ router.delete('/:id', async (req: AuthRequest, res: Response): Promise<void> => 
 
 // ── POST /api/unions/:id/enfants ─────────────────
 // Ajouter un enfant à une union existante
-router.post('/:id/enfants', async (req: AuthRequest, res: Response): Promise<void> => {
+router.post('/:id/enfants', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = filiationSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: parse.error.errors[0].message });
@@ -275,7 +275,7 @@ router.post('/:id/enfants', async (req: AuthRequest, res: Response): Promise<voi
 });
 
 // ── DELETE /api/unions/:id/enfants/:enfantId ─────
-router.delete('/:id/enfants/:enfantId', async (req: AuthRequest, res: Response): Promise<void> => {
+router.delete('/:id/enfants/:enfantId', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     await prisma.filiation.deleteMany({
       where: { unionId: req.params.id, enfantId: req.params.enfantId },
