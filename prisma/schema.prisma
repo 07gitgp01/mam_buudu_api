@@ -40,6 +40,7 @@ model User {
   emailVerifications EmailVerification[]
   timelineEvents     TimelineEvent[]
   auditLogs          AuditLog[]
+  activityLogs       ActivityLog[]
 
   @@map("users")
 }
@@ -65,6 +66,7 @@ model Famille {
   notifications  Notification[]
   subscription   Subscription?
   timelineEvents TimelineEvent[]
+  activityLogs   ActivityLog[]
 
   @@map("familles")
 }
@@ -443,6 +445,24 @@ model AuditLog {
   @@index([adminId])
   @@index([createdAt])
   @@map("audit_logs")
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid())
+  familleId  String   @map("famille_id")
+  userId     String?  @map("user_id")
+  action     String   // create_personne | update_personne | delete_personne | create_union | delete_union | create_story | delete_story | create_event | update_event | delete_event
+  targetType String   @map("target_type") // personne | union | story | timeline_event
+  targetId   String?  @map("target_id")
+  details    Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  famille    Famille  @relation(fields: [familleId], references: [id], onDelete: Cascade)
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([familleId])
+  @@index([createdAt])
+  @@map("activity_logs")
 }
 
 // ─────────────────────────────────────────

@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { notifyFamille } from '../lib/notifications';
+import { logActivity } from '../lib/activityLog';
 
 const router = Router();
 router.use(requireAuth);
@@ -139,6 +140,14 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
     const noms = union.participants
       .map(p => [p.personne.prenoms, p.personne.nomNaissance].filter(Boolean).join(' ') || 'Inconnu')
       .join(' & ');
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'create_union',
+      targetType: 'union',
+      targetId:  union.id,
+      details:   { noms },
+    });
     notifyFamille(req.user!.familleId, null, {
       type:    'nouvelle_union',
       titre:   'Nouvelle union enregistrée',
@@ -235,6 +244,14 @@ router.delete('/:id', requireManage, async (req: AuthRequest, res: Response): Pr
 
     await prisma.union.delete({ where: { id: req.params.id } });
     res.json({ message: 'Union supprimée' });
+
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'delete_union',
+      targetType: 'union',
+      targetId:  existing.id,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la suppression' });

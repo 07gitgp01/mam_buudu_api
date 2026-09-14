@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
+import { logActivity } from '../lib/activityLog';
 
 const router = Router();
 router.use(requireAuth);
@@ -15,12 +16,30 @@ const eventSchema = z.object({
   personne:    z.string().max(200).optional().nullable(),
 });
 
+/**
+ * @openapi
+ * /api/timeline:
+ *   get:
+ *     tags: [Timeline]
+ *     summary: Liste les événements chronologiques de la famille (jusqu'à 500)
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200: { description: Liste des événements }
+ *   post:
+ *     tags: [Timeline]
+ *     summary: Crée un événement (admin/gestionnaire uniquement)
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       201: { description: Événement créé }
+ *       400: { description: Données invalides }
+ */
 // ── GET /api/timeline ─────────────────────────────────────────────────────────
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
     const events = await prisma.timelineEvent.findMany({
       where: { familleId: req.user!.familleId },
       orderBy: { date: 'asc' },
+      take: 500, // garde-fou : la vue fusionne ces événements avec ceux auto-générés (naissances/décès) et les trie en une fois, pas de pagination possible ici
     });
     res.json(events);
   } catch (err) {
@@ -55,6 +74,15 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
       },
     });
     res.status(201).json(event);
+
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'create_event',
+      targetType: 'timeline_event',
+      targetId:  event.id,
+      details:   { titre: event.titre },
+    });
   } catch (err) {
     console.error('[timeline POST]', err);
     res.status(500).json({ error: 'Erreur lors de la création' });
@@ -94,6 +122,15 @@ router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promi
       },
     });
     res.json(updated);
+
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'update_event',
+      targetType: 'timeline_event',
+      targetId:  updated.id,
+      details:   { titre: updated.titre },
+    });
   } catch (err) {
     console.error('[timeline PUT]', err);
     res.status(500).json({ error: 'Erreur lors de la mise à jour' });
@@ -118,6 +155,15 @@ router.delete('/:id', requireManage, async (req: AuthRequest, res: Response): Pr
 
     await prisma.timelineEvent.delete({ where: { id: req.params.id } });
     res.status(204).send();
+
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'delete_event',
+      targetType: 'timeline_event',
+      targetId:  existing.id,
+      details:   { titre: existing.titre },
+    });
   } catch (err) {
     console.error('[timeline DELETE]', err);
     res.status(500).json({ error: 'Erreur lors de la suppression' });

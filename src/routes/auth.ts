@@ -241,6 +241,30 @@ router.post('/verify-otp', async (req: Request, res: Response): Promise<void> =>
 
 // ── POST /api/auth/register ─────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/auth/register:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Crée un nouveau compte et une nouvelle famille
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               contact: { type: string, description: "Email ou téléphone" }
+ *               nomFamille: { type: string }
+ *               prenom: { type: string }
+ *               nom: { type: string }
+ *               password: { type: string, minLength: 8 }
+ *     responses:
+ *       201: { description: Compte créé, token renvoyé }
+ *       400: { description: Données invalides }
+ *       409: { description: Contact déjà utilisé }
+ */
 router.post('/register', authLimit, async (req: Request, res: Response): Promise<void> => {
   const parse = registerSchema.safeParse(req.body);
   if (!parse.success) {
@@ -340,6 +364,27 @@ router.post('/register', authLimit, async (req: Request, res: Response): Promise
 // ── POST /api/auth/login ─────────────────────────────────────────────────────
 // Supporte : email, telephone, username (+ viewonly via username)
 
+/**
+ * @openapi
+ * /api/auth/login:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Connexion (code famille + identifiant + mot de passe)
+ *     security: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               familleCode: { type: string }
+ *               identifiant: { type: string }
+ *               password: { type: string }
+ *     responses:
+ *       200: { description: Connexion réussie, token renvoyé }
+ *       401: { description: Identifiants invalides }
+ */
 router.post('/login', authLimit, async (req: Request, res: Response): Promise<void> => {
   const body = req.body as Record<string, string>;
 

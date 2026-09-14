@@ -5,6 +5,7 @@ import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { checkPersonneQuota } from '../lib/quota';
 import { notifyFamille } from '../lib/notifications';
+import { logActivity } from '../lib/activityLog';
 
 const router = Router();
 router.use(requireAuth);
@@ -25,6 +26,19 @@ const personneSchema = z.object({
   photoUrl: z.string().url().optional().nullable(),
 });
 
+/**
+ * @openapi
+ * /api/personnes:
+ *   get:
+ *     tags: [Personnes]
+ *     summary: Liste toutes les personnes de la famille de l'utilisateur connecté
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Liste des personnes
+ *       500:
+ *         description: Erreur serveur
+ */
 // ── GET /api/personnes ──────────────────────────
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -39,6 +53,22 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   }
 });
 
+/**
+ * @openapi
+ * /api/personnes/{id}:
+ *   get:
+ *     tags: [Personnes]
+ *     summary: Détail d'une personne (avec unions et filiations)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Personne trouvée }
+ *       404: { description: Personne introuvable }
+ */
 // ── GET /api/personnes/:id ──────────────────────
 router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -70,6 +100,29 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
   }
 });
 
+/**
+ * @openapi
+ * /api/personnes:
+ *   post:
+ *     tags: [Personnes]
+ *     summary: Crée une nouvelle personne dans l'arbre (admin/gestionnaire uniquement)
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               prenoms: { type: string }
+ *               nomNaissance: { type: string }
+ *               sexe: { type: string, enum: [M, F, autre] }
+ *               dateNaissance: { type: string, description: "YYYY, YYYY-MM ou YYYY-MM-DD" }
+ *     responses:
+ *       201: { description: Personne créée }
+ *       400: { description: Données invalides }
+ *       403: { description: "Limite du plan atteinte ou accès refusé" }
+ */
 // ── POST /api/personnes ─────────────────────────
 router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = personneSchema.safeParse(req.body);
@@ -105,6 +158,14 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
 
     // Notifier tous les membres de la famille
     const nomComplet = [personne.prenoms, personne.nomNaissance].filter(Boolean).join(' ') || 'Inconnu';
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'create_personne',
+      targetType: 'personne',
+      targetId:  personne.id,
+      details:   { nom: nomComplet },
+    });
     notifyFamille(req.user!.familleId, null, {
       type:    'nouveau_membre_arbre',
       titre:   `${nomComplet} ajouté à l'arbre`,
@@ -124,6 +185,22 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
   }
 });
 
+/**
+ * @openapi
+ * /api/personnes/{id}:
+ *   put:
+ *     tags: [Personnes]
+ *     summary: Met à jour une personne (admin/gestionnaire uniquement)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Personne mise à jour }
+ *       404: { description: Personne introuvable }
+ */
 // ── PUT /api/personnes/:id ──────────────────────
 router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = personneSchema.safeParse(req.body);
@@ -148,12 +225,38 @@ router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promi
     });
 
     res.json(personne);
+
+    const nomComplet = [personne.prenoms, personne.nomNaissance].filter(Boolean).join(' ') || 'Inconnu';
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'update_personne',
+      targetType: 'personne',
+      targetId:  personne.id,
+      details:   { nom: nomComplet },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la mise à jour' });
   }
 });
 
+/**
+ * @openapi
+ * /api/personnes/{id}:
+ *   delete:
+ *     tags: [Personnes]
+ *     summary: Supprime une personne (admin/gestionnaire uniquement)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *     responses:
+ *       200: { description: Personne supprimée }
+ *       404: { description: Personne introuvable }
+ */
 // ── DELETE /api/personnes/:id ───────────────────
 router.delete('/:id', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -167,6 +270,16 @@ router.delete('/:id', requireManage, async (req: AuthRequest, res: Response): Pr
 
     await prisma.personne.delete({ where: { id: req.params.id } });
     res.json({ message: 'Personne supprimée' });
+
+    const nomComplet = [existing.prenoms, existing.nomNaissance].filter(Boolean).join(' ') || 'Inconnu';
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'delete_personne',
+      targetType: 'personne',
+      targetId:  existing.id,
+      details:   { nom: nomComplet },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la suppression' });

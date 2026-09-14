@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth, requireEdit } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { notifyFamille, notifyUser } from '../lib/notifications';
+import { logActivity } from '../lib/activityLog';
 
 const router = Router();
 router.use(requireAuth);
@@ -68,24 +69,52 @@ function shapeStory(story: any, currentUserId: string) {
 
 // ── GET /api/stories ─────────────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/stories:
+ *   get:
+ *     tags: [Stories]
+ *     summary: Liste paginée des stories actives de la famille
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 20, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: "{ data, total, page, limit, totalPages }"
+ */
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
-    const stories = await prisma.story.findMany({
-      where: {
-        familleId: req.user!.familleId,
-        OR: [
-          { expiresAt: null },
-          { expiresAt: { gt: new Date() } },
-        ],
-      },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        creator: { select: { id: true, nom: true, prenom: true } },
-        reactions: { select: { userId: true, emoji: true } },
-        views:     { select: { userId: true } },
-        _count:    { select: { comments: true } },
-      },
-    });
+    const page  = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '20'), 10) || 20));
+
+    const where = {
+      familleId: req.user!.familleId,
+      OR: [
+        { expiresAt: null },
+        { expiresAt: { gt: new Date() } },
+      ],
+    };
+
+    const [stories, total] = await Promise.all([
+      prisma.story.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: {
+          creator: { select: { id: true, nom: true, prenom: true } },
+          reactions: { select: { userId: true, emoji: true } },
+          views:     { select: { userId: true } },
+          _count:    { select: { comments: true } },
+        },
+      }),
+      prisma.story.count({ where }),
+    ]);
 
     // Chercher le sexe + avatar depuis FamilleMembre → Personne
     const creatorIds = [...new Set(stories.map(s => s.creatorId))];
@@ -102,7 +131,13 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       req.user!.id
     ));
 
-    res.json(shaped);
+    res.json({
+      data: shaped,
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
@@ -111,6 +146,17 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
 
 // ── POST /api/stories ────────────────────────────────────────────────────────
 
+/**
+ * @openapi
+ * /api/stories:
+ *   post:
+ *     tags: [Stories]
+ *     summary: Publie une nouvelle story (tout membre, hors lecture-seule)
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       201: { description: Story créée }
+ *       400: { description: Données invalides }
+ */
 router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<void> => {
   const parse = createStorySchema.safeParse(req.body);
   if (!parse.success) {
@@ -154,6 +200,14 @@ router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<v
 
     // Notifier tous les membres sauf l'auteur
     const auteur = `${story.creator.prenom} ${story.creator.nom}`;
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'create_story',
+      targetType: 'story',
+      targetId:  story.id,
+      details:   { titre: story.titre ?? null },
+    });
     notifyFamille(req.user!.familleId, req.user!.id, {
       type:    'nouvelle_story',
       titre:   `Nouvelle story de ${auteur}`,
@@ -183,6 +237,15 @@ router.delete('/:id', requireEdit, async (req: AuthRequest, res: Response): Prom
     }
     await prisma.story.delete({ where: { id: req.params.id } });
     res.status(204).send();
+
+    logActivity({
+      familleId: req.user!.familleId,
+      userId:    req.user!.id,
+      action:    'delete_story',
+      targetType: 'story',
+      targetId:  story.id,
+      details:   { titre: story.titre ?? null },
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });

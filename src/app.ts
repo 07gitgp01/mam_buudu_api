@@ -4,7 +4,11 @@ import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import path from 'path';
+import swaggerUi from 'swagger-ui-express';
+import pinoHttp from 'pino-http';
 
+import { logger } from './lib/logger';
+import { swaggerSpec } from './lib/swagger';
 import authRouter from './routes/auth';
 import personnesRouter from './routes/personnes';
 import unionsRouter from './routes/unions';
@@ -18,6 +22,7 @@ import notificationsRouter from './routes/notifications';
 import exportRouter from './routes/export';
 import subscriptionRouter from './routes/subscription';
 import timelineRouter from './routes/timeline';
+import activityRouter from './routes/activity';
 import superadminRouter from './routes/superadmin';
 import { startCronJobs } from './cron/anniversaires';
 import { seedPlans } from './lib/quota';
@@ -26,14 +31,26 @@ import { prisma } from './lib/prisma';
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// ── Observabilité ─────────────────────────────────
+app.use(pinoHttp({ logger }));
+
 // ── Sécurité ────────────────────────────────────
 app.use(helmet());
-console.log('CORS_ORIGIN env:', process.env.CORS_ORIGIN);
-const corsOrigins = process.env.CORS_ORIGIN?.trim()
-  ? process.env.CORS_ORIGIN.split(',').map((o) => o.trim())
-  : '*';
+logger.info({ corsOriginEnv: process.env.CORS_ORIGIN ?? null }, 'CORS_ORIGIN env');
+const isProduction = process.env.NODE_ENV === 'production';
+let corsOrigins: string | string[];
+if (process.env.CORS_ORIGIN?.trim()) {
+  corsOrigins = process.env.CORS_ORIGIN.split(',').map((o) => o.trim());
+} else if (isProduction) {
+  // CORS_ORIGIN non configuré en prod : on referme sur le frontend connu
+  // plutôt que d'autoriser toutes les origines.
+  logger.warn('[cors] CORS_ORIGIN non défini en production — repli sur le frontend officiel uniquement.');
+  corsOrigins = [process.env.FRONTEND_URL ?? 'https://mam-buudu.vercel.app'];
+} else {
+  corsOrigins = '*';
+}
 
-console.log('CORS_ORIGIN parsed:', corsOrigins);
+logger.info({ corsOrigins }, 'CORS_ORIGIN parsed');
 
 app.use(cors({
   origin: corsOrigins,
@@ -71,7 +88,11 @@ app.use('/api/notifications', notificationsRouter);
 app.use('/api/export',        exportRouter);
 app.use('/api/subscription',  subscriptionRouter);
 app.use('/api/timeline',      timelineRouter);
+app.use('/api/activity',      activityRouter);
 app.use('/api/superadmin',    superadminRouter);
+
+// ── Documentation API ─────────────────────────────
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // ── Health check ────────────────────────────────
 app.get('/health', (_req, res) => {
@@ -84,8 +105,8 @@ app.use((_req, res) => {
 });
 
 // ── Erreurs globales ─────────────────────────────
-app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-  console.error(err.stack);
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  logger.error({ err, path: req.path }, 'Erreur non gérée');
   res.status(500).json({ error: 'Erreur interne du serveur' });
 });
 
@@ -96,16 +117,15 @@ async function cleanOldRenderPhotos(): Promise<void> {
       where: { photoUrl: { contains: 'onrender.com/uploads/' } },
       data: { photoUrl: null },
     });
-    if (count > 0) console.log(`[startup] ${count} ancienne(s) photo(s) Render nettoyée(s)`);
+    if (count > 0) logger.info({ count }, 'ancienne(s) photo(s) Render nettoyée(s)');
   } catch (e) {
-    console.warn('[startup] nettoyage photos:', e);
+    logger.warn({ err: e }, 'nettoyage photos échoué');
   }
 }
 
 // ── Démarrage ────────────────────────────────────
 app.listen(PORT, async () => {
-  console.log(` Mam Buudu API démarrée sur le port ${PORT}`);
-  console.log(`   ENV: ${process.env.NODE_ENV || 'development'}`);
+  logger.info({ port: PORT, env: process.env.NODE_ENV || 'development' }, 'Mam Buudu API démarrée');
   await cleanOldRenderPhotos();
   await seedPlans();
   startCronJobs();
