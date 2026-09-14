@@ -631,11 +631,23 @@ router.post('/complete-profile', requireAuth, async (req: AuthRequest, res: Resp
 // ── GET /api/auth/viewonly-credentials ───────────────────────────────────────
 // Retourne les accès viewonly de la famille (admin uniquement)
 
-router.get('/viewonly-credentials', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+async function requireAdminOuGestionnaire(req: AuthRequest, res: Response): Promise<boolean> {
   if (req.user?.isViewonly) {
     res.status(403).json({ error: 'Accès refusé' });
-    return;
+    return false;
   }
+  const demandeur = await prisma.familleMembre.findUnique({
+    where: { familleId_userId: { familleId: req.user!.familleId, userId: req.user!.id } },
+  });
+  if (!demandeur || (demandeur.role !== 'admin' && demandeur.role !== 'gestionnaire')) {
+    res.status(403).json({ error: 'Seuls les administrateurs et gestionnaires peuvent accéder aux accès lecture seule' });
+    return false;
+  }
+  return true;
+}
+
+router.get('/viewonly-credentials', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!(await requireAdminOuGestionnaire(req, res))) return;
 
   try {
     let famille = await prisma.famille.findUnique({
@@ -666,6 +678,38 @@ router.get('/viewonly-credentials', requireAuth, async (req: AuthRequest, res: R
       viewonlyUsername: famille.viewonlyUsername,
       viewonlyPassword: famille.viewonlyPassword,
       familleCode: famille.codeUnique,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur' });
+  }
+});
+
+// ── POST /api/auth/viewonly-credentials/regenerate ────────────────────────────
+// Régénère le mot de passe lecture seule (invalide l'ancien immédiatement).
+router.post('/viewonly-credentials/regenerate', requireAuth, async (req: AuthRequest, res: Response): Promise<void> => {
+  if (!(await requireAdminOuGestionnaire(req, res))) return;
+
+  try {
+    const famille = await prisma.famille.findUnique({ where: { id: req.user!.familleId }, select: { viewonlyUsername: true } });
+    if (!famille) {
+      res.status(404).json({ error: 'Famille introuvable' });
+      return;
+    }
+
+    const viewonlyPassword = generateViewonlyPassword();
+    const viewonlyPasswordHash = await bcrypt.hash(viewonlyPassword, 10);
+
+    const updated = await prisma.famille.update({
+      where: { id: req.user!.familleId },
+      data: { viewonlyPassword, viewonlyPasswordHash },
+      select: { viewonlyUsername: true, viewonlyPassword: true, codeUnique: true },
+    });
+
+    res.json({
+      viewonlyUsername: updated.viewonlyUsername,
+      viewonlyPassword: updated.viewonlyPassword,
+      familleCode: updated.codeUnique,
     });
   } catch (err) {
     console.error(err);

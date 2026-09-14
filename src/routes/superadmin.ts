@@ -86,6 +86,9 @@ router.patch('/familles/:id', requireSuperAdmin, requireRole('superadmin', 'plat
     if (statut && ['actif', 'suspendu'].includes(statut)) data.statut = statut;
     if (nom) data.nom = nom;
     const famille = await prisma.famille.update({ where: { id: req.params['id'] }, data });
+    if (statut) {
+      await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'suspend_famille', targetType: 'famille', targetId: famille.id, details: { nom: famille.nom, statut } } });
+    }
     res.json(famille);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -93,7 +96,10 @@ router.patch('/familles/:id', requireSuperAdmin, requireRole('superadmin', 'plat
 // ── DELETE /api/superadmin/familles/:id ──────────────────────────────────────
 router.delete('/familles/:id', requireSuperAdmin, requireRole('superadmin'), async (req: SuperAdminRequest, res: Response): Promise<void> => {
   try {
+    const famille = await prisma.famille.findUnique({ where: { id: req.params['id'] } });
+    if (!famille) { res.status(404).json({ error: 'Famille introuvable' }); return; }
     await prisma.famille.delete({ where: { id: req.params['id'] } });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'delete_famille', targetType: 'famille', targetId: req.params['id'], details: { nom: famille.nom, codeUnique: famille.codeUnique } } });
     res.json({ message: 'Famille supprimée' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -135,6 +141,7 @@ router.patch('/users/:id', requireSuperAdmin, requireRole('superadmin'), async (
   const { platformRole, suspended } = req.body as { platformRole?: string | null; suspended?: boolean };
   if (req.params['id'] === req.superadmin?.id) { res.status(400).json({ error: 'Vous ne pouvez pas modifier votre propre rôle' }); return; }
   try {
+    const before = await prisma.user.findUnique({ where: { id: req.params['id'] }, select: { platformRole: true, suspended: true, email: true } });
     const data: any = {};
     if (platformRole !== undefined) data.platformRole = platformRole || null;
     if (suspended !== undefined) data.suspended = suspended;
@@ -142,6 +149,19 @@ router.patch('/users/:id', requireSuperAdmin, requireRole('superadmin'), async (
       where: { id: req.params['id'] },
       data,
       select: { id: true, email: true, nom: true, prenom: true, platformRole: true, suspended: true },
+    });
+    await prisma.auditLog.create({
+      data: {
+        adminId: req.superadmin!.id,
+        action: 'change_role',
+        targetType: 'user',
+        targetId: user.id,
+        details: {
+          email: user.email,
+          ...(platformRole !== undefined ? { platformRoleAvant: before?.platformRole ?? null, platformRoleApres: user.platformRole } : {}),
+          ...(suspended !== undefined ? { suspendedAvant: before?.suspended ?? null, suspendedApres: user.suspended } : {}),
+        },
+      },
     });
     res.json(user);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
@@ -151,7 +171,10 @@ router.patch('/users/:id', requireSuperAdmin, requireRole('superadmin'), async (
 router.delete('/users/:id', requireSuperAdmin, requireRole('superadmin'), async (req: SuperAdminRequest, res: Response): Promise<void> => {
   if (req.params['id'] === req.superadmin?.id) { res.status(400).json({ error: 'Vous ne pouvez pas vous supprimer' }); return; }
   try {
+    const user = await prisma.user.findUnique({ where: { id: req.params['id'] }, select: { email: true, nom: true, prenom: true } });
+    if (!user) { res.status(404).json({ error: 'Utilisateur introuvable' }); return; }
     await prisma.user.delete({ where: { id: req.params['id'] } });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'delete_user', targetType: 'user', targetId: req.params['id'], details: { email: user.email, nom: user.nom, prenom: user.prenom } } });
     res.json({ message: 'Utilisateur supprimé' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -207,6 +230,7 @@ router.patch('/plans/:id', requireSuperAdmin, requireRole('superadmin'), async (
     if (maxPersonnes !== undefined) data.maxPersonnes = maxPersonnes ?? null;
     if (features !== undefined) data.features = features;
     const plan = await prisma.plan.update({ where: { id: req.params['id'] }, data });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'edit_plan', targetType: 'plan', targetId: plan.id, details: { label: plan.label, prix: plan.prix, maxPersonnes: plan.maxPersonnes } } });
     res.json(plan);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -224,11 +248,13 @@ router.patch('/settings/:key', requireSuperAdmin, requireRole('superadmin'), asy
   const { value, label } = req.body as { value: string; label?: string };
   if (value === undefined) { res.status(400).json({ error: 'Valeur requise' }); return; }
   try {
+    const before = await prisma.platformSetting.findUnique({ where: { key: req.params['key'] } });
     const setting = await prisma.platformSetting.upsert({
       where: { key: req.params['key'] },
       create: { key: req.params['key'], value, label, updatedBy: req.superadmin?.id },
       update: { value, ...(label !== undefined ? { label } : {}), updatedBy: req.superadmin?.id },
     });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'change_setting', targetType: 'setting', targetId: setting.key, details: { valeurAvant: before?.value ?? null, valeurApres: value } } });
     res.json(setting);
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -237,6 +263,7 @@ router.patch('/settings/:key', requireSuperAdmin, requireRole('superadmin'), asy
 router.delete('/settings/:key', requireSuperAdmin, requireRole('superadmin'), async (req: SuperAdminRequest, res: Response): Promise<void> => {
   try {
     await prisma.platformSetting.delete({ where: { key: req.params['key'] } });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'delete_setting', targetType: 'setting', targetId: req.params['key'] } });
     res.json({ message: 'Paramètre supprimé' });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
@@ -303,16 +330,34 @@ router.post('/familles/:id/assign-plan', requireSuperAdmin, requireRole('superad
 router.get('/audit', requireSuperAdmin, async (req: SuperAdminRequest, res: Response): Promise<void> => {
   const page  = Math.max(1, parseInt(req.query['page'] as string) || 1);
   const limit = Math.min(100, parseInt(req.query['limit'] as string) || 30);
+  const { adminId, action, dateDebut, dateFin } = req.query as {
+    adminId?: string; action?: string; dateDebut?: string; dateFin?: string;
+  };
   try {
-    const [logs, total] = await Promise.all([
+    const where: Record<string, unknown> = {};
+    if (adminId) where['adminId'] = adminId;
+    if (action)  where['action']  = action;
+    if (dateDebut || dateFin) {
+      where['createdAt'] = {
+        ...(dateDebut ? { gte: new Date(dateDebut) } : {}),
+        ...(dateFin   ? { lte: new Date(`${dateFin}T23:59:59.999Z`) } : {}),
+      };
+    }
+
+    const [logs, total, admins] = await Promise.all([
       prisma.auditLog.findMany({
-        skip: (page - 1) * limit, take: limit,
+        where, skip: (page - 1) * limit, take: limit,
         orderBy: { createdAt: 'desc' },
         include: { admin: { select: { nom: true, prenom: true, email: true } } },
       }),
-      prisma.auditLog.count(),
+      prisma.auditLog.count({ where }),
+      prisma.user.findMany({
+        where: { platformRole: { not: null } },
+        select: { id: true, nom: true, prenom: true },
+        orderBy: { prenom: 'asc' },
+      }),
     ]);
-    res.json({ logs, total, page, pages: Math.ceil(total / limit) });
+    res.json({ logs, total, page, pages: Math.ceil(total / limit), admins });
   } catch (err) { res.status(500).json({ error: 'Erreur serveur' }); }
 });
 

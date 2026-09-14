@@ -87,6 +87,11 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
 
   const { id, parentIds = [], enfantIds = [], ...data } = parse.data;
 
+  if (parentIds.length === 0) {
+    res.status(400).json({ error: 'Sélectionnez au moins un participant pour cette union' });
+    return;
+  }
+
   try {
     // Vérifie que toutes les personnes appartiennent à la famille
     const allIds = [...parentIds, ...enfantIds];
