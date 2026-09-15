@@ -1,11 +1,14 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
+import { logger } from './logger';
+import { sendPushToUsers } from './webpush';
 
 interface NotifPayload {
   type: string;
   titre: string;
   message: string;
   data?: Prisma.InputJsonValue;
+  url?: string;
 }
 
 /** Notifie tous les membres d'une famille (sauf exceptUserId) */
@@ -35,8 +38,10 @@ export async function notifyFamille(
       })),
       skipDuplicates: true,
     });
+
+    sendPushToUsers(targets, { title: payload.titre, body: payload.message, url: payload.url });
   } catch (err) {
-    console.error('[notifications] notifyFamille error:', err);
+    logger.error({ err }, '[notifications] notifyFamille error');
   }
 }
 
@@ -57,8 +62,10 @@ export async function notifyUser(
         data:    payload.data ?? Prisma.JsonNull,
       },
     });
+
+    sendPushToUsers([userId], { title: payload.titre, body: payload.message, url: payload.url });
   } catch (err) {
-    console.error('[notifications] notifyUser error:', err);
+    logger.error({ err }, '[notifications] notifyUser error');
   }
 }
 
@@ -85,7 +92,9 @@ export async function notifyAdmins(
       })),
       skipDuplicates: true,
     });
+
+    sendPushToUsers(admins.map(a => a.userId), { title: payload.titre, body: payload.message, url: payload.url });
   } catch (err) {
-    console.error('[notifications] notifyAdmins error:', err);
+    logger.error({ err }, '[notifications] notifyAdmins error');
   }
 }

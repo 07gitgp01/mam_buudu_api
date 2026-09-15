@@ -1,5 +1,6 @@
 import { Router, Response } from 'express';
 import multer from 'multer';
+import { z } from 'zod';
 import { v2 as cloudinary } from 'cloudinary';
 import { prisma } from '../lib/prisma';
 import { requireAuth, requireManage } from '../middleware/auth';
@@ -8,6 +9,12 @@ import { notifyFamille } from '../lib/notifications';
 
 const router = Router();
 router.use(requireAuth);
+
+const photoMetaSchema = z.object({
+  caption:   z.string().max(500).optional().nullable(),
+  datePrise: z.string().max(10).optional().nullable(),
+  lieuPrise: z.string().max(200).optional().nullable(),
+});
 
 cloudinary.config({
   cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -22,6 +29,65 @@ const albumUpload = multer({
     const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
     cb(null, allowed.includes(file.mimetype));
   },
+});
+
+/**
+ * @openapi
+ * /api/photos:
+ *   get:
+ *     tags: [Photos]
+ *     summary: Galerie photo paginée de toute la famille (toutes personnes confondues)
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 24, maximum: 100 }
+ *     responses:
+ *       200:
+ *         description: "{ data, total, page, limit, totalPages }"
+ */
+// ── GET /api/photos ────────────────────────────────────────
+router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    const page  = Math.max(1, parseInt(String(req.query.page ?? '1'), 10) || 1);
+    const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit ?? '24'), 10) || 24));
+
+    const where = { familleId: req.user!.familleId };
+
+    const [photos, total] = await Promise.all([
+      prisma.photo.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (page - 1) * limit,
+        take: limit,
+        include: { personne: { select: { id: true, prenoms: true, nomNaissance: true, nomUsage: true } } },
+      }),
+      prisma.photo.count({ where }),
+    ]);
+
+    res.json({
+      data: photos.map(p => ({
+        id:         p.id,
+        url:        p.url,
+        caption:    p.caption,
+        datePrise:  p.datePrise,
+        lieuPrise:  p.lieuPrise,
+        createdAt:  p.createdAt.toISOString(),
+        personneId: p.personneId,
+        personneNom: [p.personne.prenoms, p.personne.nomUsage ?? p.personne.nomNaissance].filter(Boolean).join(' ') || null,
+      })),
+      total,
+      page,
+      limit,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    });
+  } catch (err) {
+    console.error('[photos GET all]', err);
+    res.status(500).json({ error: 'Erreur' });
+  }
 });
 
 // ── GET /api/photos/:personneId ───────────────────────────
@@ -47,9 +113,15 @@ router.get('/:personneId', async (req: AuthRequest, res: Response): Promise<void
 // ── POST /api/photos/:personneId ─────────────────────────
 router.post('/:personneId', requireManage, albumUpload.single('photo'), async (req: AuthRequest, res: Response): Promise<void> => {
   const { personneId } = req.params;
-  const { caption, datePrise, lieuPrise } = req.body;
 
   if (!req.file) { res.status(400).json({ error: 'Aucun fichier reçu' }); return; }
+
+  const parse = photoMetaSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.errors[0].message });
+    return;
+  }
+  const { caption, datePrise, lieuPrise } = parse.data;
 
   try {
     const personne = await prisma.personne.findFirst({
@@ -122,7 +194,14 @@ router.delete('/:photoId', requireManage, async (req: AuthRequest, res: Response
 // ── PATCH /api/photos/:photoId ───────────────────────────
 router.patch('/:photoId', requireManage, async (req: AuthRequest, res: Response): Promise<void> => {
   const { photoId } = req.params;
-  const { caption, datePrise, lieuPrise } = req.body;
+
+  const parse = photoMetaSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.errors[0].message });
+    return;
+  }
+  const { caption, datePrise, lieuPrise } = parse.data;
+
   try {
     const photo = await prisma.photo.findFirst({
       where: { id: photoId, familleId: req.user!.familleId },

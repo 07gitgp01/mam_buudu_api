@@ -23,6 +23,8 @@ import exportRouter from './routes/export';
 import subscriptionRouter from './routes/subscription';
 import timelineRouter from './routes/timeline';
 import activityRouter from './routes/activity';
+import importRouter from './routes/import';
+import pushRouter from './routes/push';
 import superadminRouter from './routes/superadmin';
 import { startCronJobs } from './cron/anniversaires';
 import { seedPlans } from './lib/quota';
@@ -89,6 +91,8 @@ app.use('/api/export',        exportRouter);
 app.use('/api/subscription',  subscriptionRouter);
 app.use('/api/timeline',      timelineRouter);
 app.use('/api/activity',      activityRouter);
+app.use('/api/import',        importRouter);
+app.use('/api/push',          pushRouter);
 app.use('/api/superadmin',    superadminRouter);
 
 // ── Documentation API ─────────────────────────────

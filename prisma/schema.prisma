@@ -41,6 +41,7 @@ model User {
   timelineEvents     TimelineEvent[]
   auditLogs          AuditLog[]
   activityLogs       ActivityLog[]
+  pushSubscriptions  PushSubscription[]
 
   @@map("users")
 }
@@ -105,6 +106,7 @@ model Personne {
   biographie    String?
   notes         String?
   photoUrl      String?   @map("photo_url")   // URL distante (upload)
+  visibilite    String    @default("famille") // famille (tous les membres) | prive (biographie/notes masquées aux membres simples et liens lecture-seule)
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
 
@@ -114,6 +116,7 @@ model Personne {
   familleMembre     FamilleMembre?
   photos            Photo[]
 
+  @@index([familleId])
   @@map("personnes")
 }
 
@@ -137,6 +140,7 @@ model Union {
   participants UnionParticipant[]
   filiations   Filiation[]
 
+  @@index([familleId])
   @@map("unions")
 }
 
@@ -463,6 +467,20 @@ model ActivityLog {
   @@index([familleId])
   @@index([createdAt])
   @@map("activity_logs")
+}
+
+model PushSubscription {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("push_subscriptions")
 }
 
 // ─────────────────────────────────────────

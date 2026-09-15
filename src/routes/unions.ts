@@ -5,6 +5,7 @@ import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { notifyFamille } from '../lib/notifications';
 import { logActivity } from '../lib/activityLog';
+import { redactPersonne } from '../lib/personneVisibility';
 
 const router = Router();
 router.use(requireAuth);
@@ -37,6 +38,18 @@ async function checkPersonnesFamille(personneIds: string[], familleId: string): 
   return count === personneIds.length;
 }
 
+// Redaction des personnes imbriquées (participants/enfants) d'une union.
+function redactUnion<T extends {
+  participants: { personne: Parameters<typeof redactPersonne>[0] }[];
+  filiations: { enfant: Parameters<typeof redactPersonne>[0] }[];
+}>(union: T, req: AuthRequest): T {
+  return {
+    ...union,
+    participants: union.participants.map(p => ({ ...p, personne: redactPersonne(p.personne, req) })),
+    filiations: union.filiations.map(f => ({ ...f, enfant: redactPersonne(f.enfant, req) })),
+  };
+}
+
 // ── GET /api/unions ─────────────────────────────
 router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
   try {
@@ -48,7 +61,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       },
       orderBy: { createdAt: 'asc' },
     });
-    res.json(unions);
+    res.json(unions.map(u => redactUnion(u, req)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur' });
@@ -71,7 +84,7 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
-    res.json(union);
+    res.json(redactUnion(union, req));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur' });

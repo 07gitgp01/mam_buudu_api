@@ -1,13 +1,15 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
+import { logger } from './logger';
 
 export type ActivityAction =
   | 'create_personne' | 'update_personne' | 'delete_personne'
   | 'create_union' | 'delete_union'
   | 'create_story' | 'delete_story'
-  | 'create_event' | 'update_event' | 'delete_event';
+  | 'create_event' | 'update_event' | 'delete_event'
+  | 'import_gedcom';
 
-export type ActivityTargetType = 'personne' | 'union' | 'story' | 'timeline_event';
+export type ActivityTargetType = 'personne' | 'union' | 'story' | 'timeline_event' | 'import';
 
 interface ActivityPayload {
   familleId: string;
@@ -32,6 +34,6 @@ export async function logActivity(payload: ActivityPayload): Promise<void> {
       },
     });
   } catch (e) {
-    console.warn('[activityLog]', e);
+    logger.warn({ err: e }, '[activityLog] échec de journalisation');
   }
 }

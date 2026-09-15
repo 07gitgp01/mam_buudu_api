@@ -6,6 +6,7 @@ import { AuthRequest } from '../types';
 import { checkPersonneQuota } from '../lib/quota';
 import { notifyFamille } from '../lib/notifications';
 import { logActivity } from '../lib/activityLog';
+import { redactPersonne } from '../lib/personneVisibility';
 
 const router = Router();
 router.use(requireAuth);
@@ -24,7 +25,9 @@ const personneSchema = z.object({
   biographie: z.string().optional().nullable(),
   notes: z.string().optional().nullable(),
   photoUrl: z.string().url().optional().nullable(),
+  visibilite: z.enum(['famille', 'prive']).optional(),
 });
+
 
 /**
  * @openapi
@@ -46,7 +49,7 @@ router.get('/', async (req: AuthRequest, res: Response): Promise<void> => {
       where: { familleId: req.user!.familleId },
       orderBy: { createdAt: 'asc' },
     });
-    res.json(personnes);
+    res.json(personnes.map(p => redactPersonne(p, req)));
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur' });
@@ -93,7 +96,21 @@ router.get('/:id', async (req: AuthRequest, res: Response): Promise<void> => {
       return;
     }
 
-    res.json(personne);
+    // Redaction du détail + des personnes imbriquées (conjoints/enfants) référencées
+    // via les unions de cette personne.
+    const shaped = {
+      ...redactPersonne(personne, req),
+      unionParticipants: personne.unionParticipants.map(up => ({
+        ...up,
+        union: {
+          ...up.union,
+          participants: up.union.participants.map(p => ({ ...p, personne: redactPersonne(p.personne, req) })),
+          filiations: up.union.filiations.map(f => ({ ...f, enfant: redactPersonne(f.enfant, req) })),
+        },
+      })),
+    };
+
+    res.json(shaped);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur' });
