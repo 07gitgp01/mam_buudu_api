@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from './prisma';
 import { logger } from './logger';
-import { sendPushToUsers } from './webpush';
+import { sendPushToUsers, sendPushToFamilleViewonly } from './webpush';
 
 interface NotifPayload {
   type: string;
@@ -11,35 +11,56 @@ interface NotifPayload {
   url?: string;
 }
 
-/** Notifie tous les membres d'une famille (sauf exceptUserId) */
+/**
+ * Notifie les membres d'une famille (sauf exceptUserId).
+ * Si `targetUserIds` est fourni, restreint l'envoi à ces utilisateurs précis
+ * (intersection avec les membres réels de la famille) — permet à un créateur
+ * de contenu de choisir qui doit être notifié plutôt que toute la famille.
+ * Les abonnés en accès lecture-seule de la famille sont toujours inclus côté
+ * push (ils n'ont pas de compte, donc pas de notification in-app dédiée).
+ */
 export async function notifyFamille(
   familleId: string,
   exceptUserId: string | null,
   payload: NotifPayload,
+  targetUserIds?: string[] | null,
 ): Promise<void> {
   try {
     const membres = await prisma.familleMembre.findMany({
       where: { familleId },
       select: { userId: true },
     });
-    const targets = membres
+    let targets = membres
       .map(m => m.userId)
       .filter(uid => uid !== exceptUserId);
-    if (!targets.length) return;
 
-    await prisma.notification.createMany({
-      data: targets.map(userId => ({
-        familleId,
-        userId,
-        type:    payload.type,
-        titre:   payload.titre,
-        message: payload.message,
-        data:    payload.data ?? Prisma.JsonNull,
-      })),
-      skipDuplicates: true,
-    });
+    if (targetUserIds && targetUserIds.length > 0) {
+      const restrict = new Set(targetUserIds);
+      targets = targets.filter(uid => restrict.has(uid));
+    }
 
-    sendPushToUsers(targets, { title: payload.titre, body: payload.message, url: payload.url });
+    if (targets.length > 0) {
+      await prisma.notification.createMany({
+        data: targets.map(userId => ({
+          familleId,
+          userId,
+          type:    payload.type,
+          titre:   payload.titre,
+          message: payload.message,
+          data:    payload.data ?? Prisma.JsonNull,
+        })),
+        skipDuplicates: true,
+      });
+
+      sendPushToUsers(targets, { type: payload.type, title: payload.titre, body: payload.message, url: payload.url });
+    }
+
+    // Les liens lecture-seule ne sont jamais une "cible choisie" explicitement
+    // (ils n'apparaissent pas dans targetUserIds) — mais tant que l'envoi n'est
+    // pas restreint à des personnes précises, on les inclut par défaut.
+    if (!targetUserIds || targetUserIds.length === 0) {
+      sendPushToFamilleViewonly(familleId, { type: payload.type, title: payload.titre, body: payload.message, url: payload.url });
+    }
   } catch (err) {
     logger.error({ err }, '[notifications] notifyFamille error');
   }
@@ -63,7 +84,7 @@ export async function notifyUser(
       },
     });
 
-    sendPushToUsers([userId], { title: payload.titre, body: payload.message, url: payload.url });
+    sendPushToUsers([userId], { type: payload.type, title: payload.titre, body: payload.message, url: payload.url });
   } catch (err) {
     logger.error({ err }, '[notifications] notifyUser error');
   }
@@ -93,7 +114,7 @@ export async function notifyAdmins(
       skipDuplicates: true,
     });
 
-    sendPushToUsers(admins.map(a => a.userId), { title: payload.titre, body: payload.message, url: payload.url });
+    sendPushToUsers(admins.map(a => a.userId), { type: payload.type, title: payload.titre, body: payload.message, url: payload.url });
   } catch (err) {
     logger.error({ err }, '[notifications] notifyAdmins error');
   }

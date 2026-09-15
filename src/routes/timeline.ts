@@ -4,6 +4,7 @@ import { prisma } from '../lib/prisma';
 import { requireAuth, requireManage } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { logActivity } from '../lib/activityLog';
+import { notifyFamille } from '../lib/notifications';
 
 const router = Router();
 router.use(requireAuth);
@@ -14,6 +15,7 @@ const eventSchema = z.object({
   type:        z.enum(['naissance', 'mariage', 'deces', 'succes', 'voyage', 'autre']).default('autre'),
   date:        z.string().min(4).max(10), // YYYY, YYYY-MM ou YYYY-MM-DD
   personne:    z.string().max(200).optional().nullable(),
+  notifyUserIds: z.array(z.string().uuid()).optional().nullable(), // qui notifier (POST uniquement) — absent/null = toute la famille
 });
 
 /**
@@ -83,6 +85,12 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
       targetId:  event.id,
       details:   { titre: event.titre },
     });
+    notifyFamille(req.user!.familleId, req.user!.id, {
+      type:    'nouvel_evenement',
+      titre:   `Nouvel événement : ${event.titre}`,
+      message: event.description ? event.description.slice(0, 100) : `Ajouté à la timeline familiale (${event.date})`,
+      data:    { eventId: event.id, titre: event.titre },
+    }, parse.data.notifyUserIds);
   } catch (err) {
     console.error('[timeline POST]', err);
     res.status(500).json({ error: 'Erreur lors de la création' });

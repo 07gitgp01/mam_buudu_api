@@ -68,6 +68,7 @@ model Famille {
   subscription   Subscription?
   timelineEvents TimelineEvent[]
   activityLogs   ActivityLog[]
+  pushSubscriptions PushSubscription[]
 
   @@map("familles")
 }
@@ -471,15 +472,24 @@ model ActivityLog {
 
 model PushSubscription {
   id        String   @id @default(uuid())
-  userId    String   @map("user_id")
+  // Compte réel (userId renseigné, familleId non utilisé) OU accès lecture-seule
+  // (userId null, familleId renseigné — un abonnement par appareil, pas de compte
+  // personnel à rattacher). L'un des deux est toujours renseigné, jamais les deux
+  // ni aucun — invariant vérifié côté application (routes/push.ts).
+  userId    String?  @map("user_id")
+  familleId String?  @map("famille_id")
   endpoint  String   @unique
   p256dh    String
   auth      String
+  // Types de notification souhaités (ex: "nouvelle_story") — tableau vide = tout recevoir.
+  types     String[] @default([])
   createdAt DateTime @default(now()) @map("created_at")
 
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  famille   Famille? @relation(fields: [familleId], references: [id], onDelete: Cascade)
 
   @@index([userId])
+  @@index([familleId])
   @@map("push_subscriptions")
 }
 

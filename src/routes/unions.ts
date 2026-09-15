@@ -23,6 +23,7 @@ const unionSchema = z.object({
   parentIds: z.array(z.string().uuid()).max(2).optional(),
   // Enfants : tableau de { enfantId, ordreNaissance }
   enfantIds: z.array(z.string().uuid()).optional(),
+  notifyUserIds: z.array(z.string().uuid()).optional().nullable(), // qui notifier (POST uniquement) — absent/null = toute la famille
 });
 
 const filiationSchema = z.object({
@@ -99,7 +100,7 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
     return;
   }
 
-  const { id, parentIds = [], enfantIds = [], ...data } = parse.data;
+  const { id, parentIds = [], enfantIds = [], notifyUserIds, ...data } = parse.data;
 
   if (parentIds.length === 0) {
     res.status(400).json({ error: 'Sélectionnez au moins un participant pour cette union' });
@@ -166,7 +167,7 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
       titre:   'Nouvelle union enregistrée',
       message: noms ? `Union de ${noms}` : 'Une nouvelle union a été ajoutée à l\'arbre',
       data:    { unionId: union.id, type: union.type ?? null },
-    });
+    }, notifyUserIds);
   } catch (err: unknown) {
     if ((err as { code?: string }).code === 'P2002') {
       res.status(409).json({ error: 'Cette union existe déjà' });
@@ -185,7 +186,7 @@ router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promi
     return;
   }
 
-  const { id: _id, parentIds, enfantIds, ...data } = parse.data;
+  const { id: _id, parentIds, enfantIds, notifyUserIds: _notifyUserIds, ...data } = parse.data;
 
   try {
     const existing = await prisma.union.findFirst({

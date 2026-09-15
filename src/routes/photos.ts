@@ -123,6 +123,16 @@ router.post('/:personneId', requireManage, albumUpload.single('photo'), async (r
   }
   const { caption, datePrise, lieuPrise } = parse.data;
 
+  // multipart/form-data : les champs non-fichier arrivent en chaînes — le tableau
+  // de destinataires est donc envoyé encodé en JSON par le client.
+  let notifyUserIds: string[] | null = null;
+  if (typeof req.body.notifyUserIds === 'string') {
+    try {
+      const parsed = JSON.parse(req.body.notifyUserIds);
+      if (Array.isArray(parsed)) notifyUserIds = parsed;
+    } catch { /* ignoré — équivaut à "toute la famille" */ }
+  }
+
   try {
     const personne = await prisma.personne.findFirst({
       where: { id: personneId, familleId: req.user!.familleId },
@@ -161,7 +171,7 @@ router.post('/:personneId', requireManage, albumUpload.single('photo'), async (r
       titre:   `Nouvelle photo de ${nomPersonne}`,
       message: caption ? `"${caption}"` : `Photo ajoutée à l'album de ${nomPersonne}`,
       data:    { personneId, photoUrl: photo.url, nom: nomPersonne },
-    });
+    }, notifyUserIds);
   } catch (err) {
     console.error('[photos POST]', err);
     res.status(500).json({ error: 'Erreur upload' });

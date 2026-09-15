@@ -26,6 +26,7 @@ const personneSchema = z.object({
   notes: z.string().optional().nullable(),
   photoUrl: z.string().url().optional().nullable(),
   visibilite: z.enum(['famille', 'prive']).optional(),
+  notifyUserIds: z.array(z.string().uuid()).optional().nullable(), // qui notifier (POST uniquement) — absent/null = toute la famille
 });
 
 
@@ -148,7 +149,7 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
     return;
   }
 
-  const { id, ...data } = parse.data;
+  const { id, notifyUserIds, ...data } = parse.data;
 
   try {
     // Vérification quota
@@ -190,7 +191,7 @@ router.post('/', requireManage, async (req: AuthRequest, res: Response): Promise
         ? `Né(e) le ${personne.dateNaissance}${personne.lieuNaissance ? ` à ${personne.lieuNaissance}` : ''}`
         : 'Nouveau membre dans l\'arbre généalogique',
       data:    { personneId: personne.id, nom: nomComplet, photoUrl: personne.photoUrl ?? null },
-    });
+    }, notifyUserIds);
   } catch (err: unknown) {
     // Conflit d'ID unique (même UUID déjà en base)
     if ((err as { code?: string }).code === 'P2002') {
@@ -235,7 +236,7 @@ router.put('/:id', requireManage, async (req: AuthRequest, res: Response): Promi
       return;
     }
 
-    const { id: _id, ...data } = parse.data;
+    const { id: _id, notifyUserIds: _notifyUserIds, ...data } = parse.data;
     const personne = await prisma.personne.update({
       where: { id: req.params.id },
       data,

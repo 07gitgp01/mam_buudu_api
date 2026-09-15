@@ -8,12 +8,18 @@ import { logger } from '../lib/logger';
 
 const router = Router();
 
+const NOTIF_TYPES = [
+  'nouveau_membre_arbre', 'nouvelle_union', 'nouvelle_story',
+  'photo_ajoutee', 'nouvel_evenement', 'anniversaire',
+] as const;
+
 const subscribeSchema = z.object({
   endpoint: z.string().url(),
   keys: z.object({
     p256dh: z.string().min(1),
     auth:   z.string().min(1),
   }),
+  types: z.array(z.enum(NOTIF_TYPES)).optional(),
 });
 
 /**
@@ -43,33 +49,34 @@ router.use(requireAuth);
  * /api/push/subscribe:
  *   post:
  *     tags: [Push]
- *     summary: Enregistre un abonnement navigateur (PushSubscription) pour l'utilisateur connecté
+ *     summary: >
+ *       Enregistre (ou met à jour) un abonnement navigateur pour l'utilisateur connecté,
+ *       ou pour l'accès lecture-seule courant (rattaché à la famille, pas à un compte).
+ *       Appeler à nouveau avec les mêmes endpoint/keys pour changer les `types` reçus.
  *     security: [{ bearerAuth: [] }]
  *     responses:
  *       201: { description: Abonnement enregistré }
  *       400: { description: Données invalides }
  */
 router.post('/subscribe', async (req: AuthRequest, res: Response): Promise<void> => {
-  // Les accès "lecture seule" (isViewonly) ne correspondent à aucun compte User réel
-  // (req.user.id vaut littéralement 'viewonly') — un abonnement échouerait sur la
-  // contrainte de clé étrangère. Il s'agit d'un lien partagé, pas d'un compte personnel.
-  if (req.user!.isViewonly) {
-    res.status(403).json({ error: "Les notifications ne sont pas disponibles pour les accès lecture seule." });
-    return;
-  }
-
   const parse = subscribeSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: 'Abonnement push invalide' });
     return;
   }
-  const { endpoint, keys } = parse.data;
+  const { endpoint, keys, types } = parse.data;
+
+  // Compte réel → rattaché à userId. Accès lecture-seule (pas de compte, id
+  // pseudo "viewonly") → rattaché à familleId, un abonnement par appareil.
+  const identity = req.user!.isViewonly
+    ? { userId: null, familleId: req.user!.familleId }
+    : { userId: req.user!.id, familleId: null };
 
   try {
     await prisma.pushSubscription.upsert({
       where: { endpoint },
-      update: { userId: req.user!.id, p256dh: keys.p256dh, auth: keys.auth },
-      create: { userId: req.user!.id, endpoint, p256dh: keys.p256dh, auth: keys.auth },
+      update: { ...identity, p256dh: keys.p256dh, auth: keys.auth, types: types ?? [] },
+      create: { ...identity, endpoint, p256dh: keys.p256dh, auth: keys.auth, types: types ?? [] },
     });
     res.status(201).json({ ok: true });
   } catch (err) {
@@ -94,8 +101,12 @@ router.delete('/subscribe', async (req: AuthRequest, res: Response): Promise<voi
     res.status(400).json({ error: 'endpoint requis' });
     return;
   }
+  const identity = req.user!.isViewonly
+    ? { userId: null, familleId: req.user!.familleId }
+    : { userId: req.user!.id };
+
   try {
-    await prisma.pushSubscription.deleteMany({ where: { endpoint, userId: req.user!.id } });
+    await prisma.pushSubscription.deleteMany({ where: { endpoint, ...identity } });
     res.json({ ok: true });
   } catch (err) {
     logger.error({ err }, '[push unsubscribe]');

@@ -19,6 +19,7 @@ const createStorySchema = z.object({
   mediaType: z.enum(['photo', 'video', 'text', 'audio']).optional().nullable(),
   expiresAt: z.string().datetime().optional().nullable(), // ISO string, null = permanent
   privacy:   z.enum(['family', 'custom', 'private']).default('family'),
+  notifyUserIds: z.array(z.string().uuid()).optional().nullable(), // qui notifier — absent/null = toute la famille
 });
 
 const reactSchema = z.object({
@@ -165,7 +166,7 @@ router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<v
   }
 
   try {
-    const { titre, caption, tag, mediaUrl, mediaType, expiresAt, privacy } = parse.data;
+    const { titre, caption, tag, mediaUrl, mediaType, expiresAt, privacy, notifyUserIds } = parse.data;
 
     const story = await prisma.story.create({
       data: {
@@ -213,7 +214,7 @@ router.post('/', requireEdit, async (req: AuthRequest, res: Response): Promise<v
       titre:   `Nouvelle story de ${auteur}`,
       message: story.titre ? `"${story.titre}" — ${story.caption.slice(0, 80)}` : story.caption.slice(0, 100),
       data:    { storyId: story.id, auteur, tag: story.tag ?? null },
-    });
+    }, notifyUserIds);
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur serveur' });
