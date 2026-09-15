@@ -50,6 +50,14 @@ router.use(requireAuth);
  *       400: { description: Données invalides }
  */
 router.post('/subscribe', async (req: AuthRequest, res: Response): Promise<void> => {
+  // Les accès "lecture seule" (isViewonly) ne correspondent à aucun compte User réel
+  // (req.user.id vaut littéralement 'viewonly') — un abonnement échouerait sur la
+  // contrainte de clé étrangère. Il s'agit d'un lien partagé, pas d'un compte personnel.
+  if (req.user!.isViewonly) {
+    res.status(403).json({ error: "Les notifications ne sont pas disponibles pour les accès lecture seule." });
+    return;
+  }
+
   const parse = subscribeSchema.safeParse(req.body);
   if (!parse.success) {
     res.status(400).json({ error: 'Abonnement push invalide' });
