@@ -30,8 +30,8 @@ function acceptsType(sub: Pick<PushSubscription, 'types'>, type: string): boolea
   return sub.types.length === 0 || sub.types.includes(type);
 }
 
-async function dispatch(subs: PushSubscription[], payload: PushPayload): Promise<void> {
-  const targets = subs.filter(s => acceptsType(s, payload.type));
+async function dispatch(subs: PushSubscription[], payload: PushPayload, bypassTypeFilter = false): Promise<void> {
+  const targets = bypassTypeFilter ? subs : subs.filter(s => acceptsType(s, payload.type));
   if (targets.length === 0) return;
 
   const body = JSON.stringify({
@@ -86,5 +86,24 @@ export async function sendPushToFamilleViewonly(familleId: string, payload: Push
     await dispatch(subs, payload);
   } catch (err) {
     logger.error({ err }, '[webpush] sendPushToFamilleViewonly error');
+  }
+}
+
+/**
+ * Envoie une notification push à TOUS les abonnements existants (comptes réels
+ * + appareils viewonly), sans filtrage par type — réservé aux annonces
+ * plateforme (ex. nouvelle mise à jour) qui ne doivent pas être filtrables
+ * par préférence de contenu.
+ */
+export async function sendBroadcastPush(payload: Omit<PushPayload, 'type'>): Promise<number> {
+  if (!configured) return 0;
+  try {
+    const subs = await prisma.pushSubscription.findMany();
+    if (subs.length === 0) return 0;
+    await dispatch(subs, { ...payload, type: '__broadcast__' }, true);
+    return subs.length;
+  } catch (err) {
+    logger.error({ err }, '[webpush] sendBroadcastPush error');
+    return 0;
   }
 }

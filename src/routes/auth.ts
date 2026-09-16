@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import rateLimit from 'express-rate-limit';
 import { z } from 'zod';
 import { prisma } from '../lib/prisma';
-import { generateToken, generateViewonlyToken, requireAuth } from '../middleware/auth';
+import { generateToken, generateViewonlyToken, requireAuth, requireEdit } from '../middleware/auth';
 import { AuthRequest } from '../types';
 import { sendEmail, tplPasswordReset, tplEmailVerification, tplOtp } from '../lib/mailer';
 import { sendSms } from '../lib/sms';
@@ -515,6 +515,45 @@ router.post('/reset-password-secret', authLimit, async (req: Request, res: Respo
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Erreur lors de la réinitialisation' });
+  }
+});
+
+// ── POST /api/auth/change-password ────────────────────────────────────────────
+// Changement de mot de passe pour un utilisateur déjà connecté (ancien + nouveau).
+// Interdit aux sessions viewonly (pas de compte personnel, pas de mot de passe à elles).
+const changePasswordSchema = z.object({
+  ancienPassword:   z.string().min(1, 'Ancien mot de passe requis'),
+  nouveauPassword:  z.string().min(6, 'Le nouveau mot de passe doit contenir au moins 6 caractères'),
+});
+
+router.post('/change-password', requireAuth, requireEdit, async (req: AuthRequest, res: Response): Promise<void> => {
+  const parse = changePasswordSchema.safeParse(req.body);
+  if (!parse.success) {
+    res.status(400).json({ error: parse.error.errors[0].message });
+    return;
+  }
+  const { ancienPassword, nouveauPassword } = parse.data;
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.user!.id } });
+    if (!user) {
+      res.status(404).json({ error: 'Utilisateur introuvable' });
+      return;
+    }
+
+    const valid = await bcrypt.compare(ancienPassword, user.passwordHash);
+    if (!valid) {
+      res.status(400).json({ error: 'Ancien mot de passe incorrect' });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(nouveauPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+
+    res.json({ message: 'Mot de passe mis à jour avec succès' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Erreur lors du changement de mot de passe' });
   }
 });
 

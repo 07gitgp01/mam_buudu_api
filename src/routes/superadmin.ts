@@ -3,6 +3,7 @@ import bcrypt from 'bcryptjs';
 import { prisma } from '../lib/prisma';
 import { requireSuperAdmin, requireRole, generateSuperAdminToken } from '../middleware/superadmin';
 import { SuperAdminRequest } from '../types';
+import { sendBroadcastPush } from '../lib/webpush';
 
 const router = Router();
 
@@ -19,6 +20,24 @@ router.post('/auth/login', async (req: Request, res: Response): Promise<void> =>
     if (!valid) { res.status(401).json({ error: 'Email ou mot de passe incorrect' }); return; }
     const token = generateSuperAdminToken(user.id, user.platformRole);
     res.json({ token, user: { id: user.id, nom: user.nom, prenom: user.prenom, email: user.email, platformRole: user.platformRole } });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── POST /api/superadmin/change-password ─────────────────────────────────────
+// Le superadmin change son propre mot de passe (ancien + nouveau requis).
+router.post('/change-password', requireSuperAdmin, async (req: SuperAdminRequest, res: Response): Promise<void> => {
+  const { ancienPassword, nouveauPassword } = req.body as { ancienPassword?: string; nouveauPassword?: string };
+  if (!ancienPassword || !nouveauPassword) { res.status(400).json({ error: 'Ancien et nouveau mot de passe requis' }); return; }
+  if (nouveauPassword.length < 8) { res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 8 caractères' }); return; }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.superadmin!.id } });
+    if (!user) { res.status(404).json({ error: 'Utilisateur introuvable' }); return; }
+    const valid = await bcrypt.compare(ancienPassword, user.passwordHash);
+    if (!valid) { res.status(400).json({ error: 'Ancien mot de passe incorrect' }); return; }
+    const passwordHash = await bcrypt.hash(nouveauPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'change_own_password', targetType: 'user', targetId: user.id, details: {} } });
+    res.json({ message: 'Mot de passe mis à jour avec succès' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -164,6 +183,22 @@ router.patch('/users/:id', requireSuperAdmin, requireRole('superadmin'), async (
       },
     });
     res.json(user);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
+});
+
+// ── POST /api/superadmin/users/:id/reset-password ────────────────────────────
+// Réinitialise le mot de passe d'un utilisateur (le superadmin choisit le
+// nouveau mot de passe, à communiquer manuellement à la personne concernée).
+router.post('/users/:id/reset-password', requireSuperAdmin, requireRole('superadmin'), async (req: SuperAdminRequest, res: Response): Promise<void> => {
+  const { newPassword } = req.body as { newPassword?: string };
+  if (!newPassword || newPassword.length < 6) { res.status(400).json({ error: 'Le nouveau mot de passe doit contenir au moins 6 caractères' }); return; }
+  try {
+    const user = await prisma.user.findUnique({ where: { id: req.params['id'] }, select: { id: true, email: true, nom: true, prenom: true } });
+    if (!user) { res.status(404).json({ error: 'Utilisateur introuvable' }); return; }
+    const passwordHash = await bcrypt.hash(newPassword, 12);
+    await prisma.user.update({ where: { id: user.id }, data: { passwordHash } });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'reset_user_password', targetType: 'user', targetId: user.id, details: { email: user.email, nom: user.nom, prenom: user.prenom } } });
+    res.json({ message: 'Mot de passe réinitialisé avec succès' });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
 
@@ -406,8 +441,9 @@ router.post('/broadcast', requireSuperAdmin, requireRole('superadmin'), async (r
       data: membres.map(m => ({ userId: m.userId, familleId: m.familleId, type: 'plateforme', titre, message })),
       skipDuplicates: false,
     });
-    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'broadcast', details: { titre, sent: result.count } } });
-    res.json({ sent: result.count });
+    const pushSent = await sendBroadcastPush({ title: titre, body: message });
+    await prisma.auditLog.create({ data: { adminId: req.superadmin!.id, action: 'broadcast', details: { titre, sent: result.count, pushSent } } });
+    res.json({ sent: result.count, pushSent });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Erreur serveur' }); }
 });
 

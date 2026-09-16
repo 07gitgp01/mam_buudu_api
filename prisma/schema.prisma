@@ -439,7 +439,7 @@ model PlatformSetting {
 model AuditLog {
   id         String   @id @default(uuid())
   adminId    String?  @map("admin_id")
-  action     String   // suspend_famille | delete_famille | assign_plan | delete_user | change_role | broadcast | change_setting
+  action     String   // suspend_famille | delete_famille | assign_plan | delete_user | change_role | broadcast | change_setting | change_own_password | reset_user_password
   targetType String?  @map("target_type") // famille | user | plan | setting
   targetId   String?  @map("target_id")
   details    Json?
