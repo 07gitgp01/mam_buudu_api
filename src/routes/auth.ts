@@ -469,6 +469,7 @@ router.post('/login', authLimit, async (req: Request, res: Response): Promise<vo
         id: user.id, email: user.email, telephone: user.telephone,
         nom: user.nom, prenom: user.prenom, role: membre.role,
         hasCompletedProfile, emailVerified: user.emailVerified,
+        personneId: membre.personneId,
       },
       famille: { id: famille.id, nom: famille.nom, codeUnique: famille.codeUnique },
     });
