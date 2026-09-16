@@ -38,7 +38,7 @@ async function dispatch(subs: PushSubscription[], payload: PushPayload): Promise
     notification: {
       title: payload.title,
       body:  payload.body,
-      icon:  '/favicon.ico', // les icônes PWA (icons/icon-*.png) référencées par le manifest n'existent pas encore sur le disque
+      icon:  '/images/favicon-192.png',
       data:  { url: payload.url ?? '/' },
     },
   });
